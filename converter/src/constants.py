@@ -1,6 +1,6 @@
 # constants.py
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Optional, List, Dict, Tuple, Union
 import music21
 from src.duration import DurationManager, DurationInfo
@@ -81,6 +81,21 @@ class Note:
     def position_beats(self) -> float:
         return self.position.beats
     
+    @property
+    def positionBeats(self) -> float:
+        """为了保持与JSON字段名称一致的别名"""
+        return self.position_beats
+    
+    @property
+    def pitchName(self) -> str:
+        """为了保持与JSON字段名称一致的别名"""
+        return self.pitch_name
+    
+    @property
+    def durationBeats(self) -> float:
+        """为了保持与JSON字段名称一致的别名"""
+        return self.duration_beats
+    
     def to_music21(self) -> music21.note.Note:
         """转换为music21音符"""
         note = music21.note.Note(self.pitch_name)
@@ -102,8 +117,19 @@ class Note:
 class Measure:
     """小节数据模型"""
     number: int
-    notes: List[Note]
-    start_position: float
+    notes: List['Note'] = field(default_factory=list)
+    height: float = 0.0  # 添加默认值
+    width: float = 0.0   # 添加默认值
+    x: float = 0.0       # 添加默认值
+    y: float = 0.0       # 添加默认值
+    staffDistance: float = 0.0  # 添加默认值
+    start_position: float = 0.0
+    start_position_seconds: float = 0.0
+    
+    @property
+    def startPositionBeats(self) -> float:
+        """为了保持与JSON字段名称一致的别名"""
+        return self.start_position
     
     def get_notes_by_staff(self, clef_type: ClefType) -> List[Note]:
         """根据谱号获取音符列表"""
@@ -118,7 +144,7 @@ class Measure:
         return (self.number - 1) * BEATS_PER_MEASURE
     
     def validate_duration(self) -> Tuple[bool, float]:
-        """验证小节时值"""
+        """验小节时值"""
         music21_elements = [note.to_music21() for note in self.notes]
         return DurationManager.validate_measure_duration(
             music21_elements, 
@@ -128,7 +154,7 @@ class Measure:
 @dataclass
 class Score:
     """乐谱数据模型"""
-    measures: List[Measure]
+    measures: List[Measure] = field(default_factory=list)  # 有默认值的字段放在后面
     
     @classmethod
     def from_json(cls, json_data: dict) -> 'Score':

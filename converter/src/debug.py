@@ -129,24 +129,68 @@ class ScoreDebugger:
         """检查是否需要调试该小节"""
         return not self.debug_measures or measure_number in self.debug_measures
     
-    def compare_measure(self, measure_number: int, json_measure: Measure, m21_measure: music21.stream.Measure):
-        """比较JSON和music21的小节"""
-        if not self.should_debug(measure_number):
-            return
-            
-        # 创建小节调试信息
-        debug_info = MeasureDebugInfo(
-            measure_number=measure_number,
-            original_notes=json_measure.notes,
-            processed_measure=m21_measure
-        )
+    def compare_measure(
+        self, 
+        measure_number: int, 
+        measure_data: 'Measure', 
+        treble_measure: music21.stream.Measure, 
+        bass_measure: music21.stream.Measure
+    ):
+        """比较处理前后的小节，确保转换正确"""
+        print(f"\nDebug: Comparing Measure {measure_number}")
         
-        # 存储调试信息
-        self.measure_info[measure_number] = debug_info
+        # 获取原始和转换后的高音谱表音符
+        original_treble_notes = measure_data.get_notes_by_staff(ClefType.TREBLE)
+        converted_treble_notes = [n for n in treble_measure.notes if isinstance(n, music21.note.Note)]
         
-        # 打印比较信息
-        debug_info.print_comparison()
+        # 获取原始和转换后的低音谱表音符
+        original_bass_notes = measure_data.get_notes_by_staff(ClefType.BASS)
+        converted_bass_notes = [n for n in bass_measure.notes if isinstance(n, music21.note.Note)]
+        
+        # 解析音符为 music21.Pitch 对象
+        original_treble_pitches = [music21.pitch.Pitch(n.pitchName) for n in original_treble_notes]
+        converted_treble_pitches = [music21.pitch.Pitch(n.nameWithOctave) for n in converted_treble_notes]
+        
+        original_bass_pitches = [music21.pitch.Pitch(n.pitchName) for n in original_bass_notes]
+        converted_bass_pitches = [music21.pitch.Pitch(n.nameWithOctave) for n in converted_bass_notes]
+        
+        # 打印原始和转换后的音符
+        print(f"  Original Treble Notes: {[p.nameWithOctave for p in original_treble_pitches]}")
+        print(f"  Converted Treble Notes: {[f'{p.nameWithOctave} ({n.duration.type}{'+' if n.duration.dots else ''})' for p, n in zip(converted_treble_pitches, converted_treble_notes)]}")
+        
+        print(f"  Original Bass Notes: {[p.nameWithOctave for p in original_bass_pitches]}")
+        print(f"  Converted Bass Notes: {[f'{p.nameWithOctave} ({n.duration.type}{'+' if n.duration.dots else ''})' for p, n in zip(converted_bass_pitches, converted_bass_notes)]}")
+        
+        # 比较音符数量
+        treble_count = len(original_treble_pitches)
+        treble_converted_count = len(converted_treble_pitches)
     
+        if treble_count != treble_converted_count:
+            print(f"  Error: Treble notes count mismatch. Original: {treble_count}, Converted: {treble_converted_count}")
+        else:
+            print(f"  Measure {measure_number} Treble notes count match.")
+    
+        bass_count = len(original_bass_pitches)
+        bass_converted_count = len(converted_bass_pitches)
+    
+        if bass_count != bass_converted_count:
+            print(f"  Error: Bass notes count mismatch. Original: {bass_count}, Converted: {bass_converted_count}")
+        else:
+            print(f"  Measure {measure_number} Bass notes count match.")
+        
+        # 进一步比较每个音符的音高和时值
+        for i, (orig_p, conv_p, conv_n) in enumerate(zip(original_treble_pitches, converted_treble_pitches, converted_treble_notes)):
+            if orig_p.midi != conv_p.midi:
+                print(f"    Error: Treble Note {i+1} pitch mismatch. Original: {orig_p.nameWithOctave}, Converted: {conv_p.nameWithOctave}")
+            if round(measure_data.notes[i].durationBeats, 2) != round(conv_n.duration.quarterLength, 2):
+                print(f"    Error: Treble Note {i+1} duration mismatch. Original: {measure_data.notes[i].durationBeats}, Converted: {conv_n.duration.quarterLength}")
+        
+        for i, (orig_p, conv_p, conv_n) in enumerate(zip(original_bass_pitches, converted_bass_pitches, converted_bass_notes)):
+            if orig_p.midi != conv_p.midi:
+                print(f"    Error: Bass Note {i+1} pitch mismatch. Original: {orig_p.nameWithOctave}, Converted: {conv_p.nameWithOctave}")
+            if round(measure_data.notes[i].durationBeats, 2) != round(conv_n.duration.quarterLength, 2):
+                print(f"    Error: Bass Note {i+1} duration mismatch. Original: {measure_data.notes[i].durationBeats}, Converted: {conv_n.duration.quarterLength}")
+
     def print_summary(self):
         """打印调试信息汇总"""
         if not self.measure_info:
