@@ -102,24 +102,50 @@ class ScoreConverter:
             measure.append(rest)
             return
 
-        # 按位置排序音符
-        sorted_notes = sorted(notes, key=lambda n: n.position_beats)
+        # 按位置分组音符
+        position_groups = {}
+        for note in sorted(notes, key=lambda n: n.position_beats):
+            pos = note.position_beats
+            if pos not in position_groups:
+                position_groups[pos] = []
+            position_groups[pos].append(note)
         
-        for note in sorted_notes:
-            # 计算相对位置
-            relative_pos = note.position_beats - measure_start
+        # 处理每个位置的音符
+        for pos, pos_notes in position_groups.items():
+            relative_pos = pos - measure_start
             
-            # 创建音符
-            m21_note = music21.note.Note(note.pitch_name) if note.pitch_name.lower() != 'rest' else music21.note.Rest()
-            
-            # 使用 durationType 和 durationBeats 设置时值
-            m21_note.duration = DurationManager.create_duration(
-                duration_type=note.duration_type,
-                quarter_length=note.duration_beats * 4  # 转换为四分音符长度
-            )
-            
-            # 设置音符位置
-            measure.insert(relative_pos, m21_note)
+            if len(pos_notes) > 1:
+                # 创建和弦
+                pitches = []
+                for note in pos_notes:
+                    if note.pitch_name.lower() != 'rest':
+                        pitches.append(note.pitch_name)
+                
+                if pitches:  # 只有当有实际音符时才创建和弦
+                    chord = music21.chord.Chord(pitches)
+                    # 使用第一个音符的时值
+                    chord.duration = DurationManager.create_duration(
+                        duration_type=pos_notes[0].duration_type,
+                        quarter_length=pos_notes[0].duration_beats * 4
+                    )
+                    measure.insert(relative_pos, chord)
+                else:
+                    # 如果所有音符都是休止符，只添加一个休止符
+                    rest = music21.note.Rest()
+                    rest.duration = DurationManager.create_duration(
+                        duration_type=pos_notes[0].duration_type,
+                        quarter_length=pos_notes[0].duration_beats * 4
+                    )
+                    measure.insert(relative_pos, rest)
+            else:
+                # 单个音符
+                note = pos_notes[0]
+                m21_note = music21.note.Note(note.pitch_name) if note.pitch_name.lower() != 'rest' else music21.note.Rest()
+                m21_note.duration = DurationManager.create_duration(
+                    duration_type=note.duration_type,
+                    quarter_length=note.duration_beats * 4
+                )
+                measure.insert(relative_pos, m21_note)
     
     def _process_chord_notes(self, notes: List[Note], measure_start: float) -> List[music21.chord.Chord]:
         """处理同一位置的多个音符（和弦）"""
