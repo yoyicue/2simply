@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 import music21
 from src.constants import (
     Note, Score, ClefType, Measure,
-    TIME_SIGNATURE, BEATS_PER_MEASURE, STAFF_SPLIT_Y
+    TIME_SIGNATURE, BEATS_PER_MEASURE, STAFF_SPLIT_Y, KEY_SIGNATURE
 )
 from src.debug import ScoreDebugger
 from src.duration import DurationManager
@@ -33,7 +33,7 @@ class ScoreConverter:
             
             # 添加时间签名到第一小节
             if measure_data.number == 1:
-                ts = music21.meter.TimeSignature('4/4')
+                ts = music21.meter.TimeSignature(TIME_SIGNATURE)
                 treble_measure.timeSignature = ts
                 bass_measure.timeSignature = ts
             
@@ -98,7 +98,9 @@ class ScoreConverter:
         if not notes:
             # 添加全小节休止符
             rest = music21.note.Rest()
-            rest.duration = DurationManager.create_duration('whole')
+            rest.duration = DurationManager.create_duration(
+                quarter_length=BEATS_PER_MEASURE
+            )
             measure.append(rest)
             return
 
@@ -126,7 +128,7 @@ class ScoreConverter:
                     # 使用第一个音符的时值
                     chord.duration = DurationManager.create_duration(
                         duration_type=pos_notes[0].duration_type,
-                        quarter_length=pos_notes[0].duration_beats * 4
+                        quarter_length=pos_notes[0].duration_beats * BEATS_PER_MEASURE
                     )
                     measure.insert(relative_pos, chord)
                 else:
@@ -134,7 +136,7 @@ class ScoreConverter:
                     rest = music21.note.Rest()
                     rest.duration = DurationManager.create_duration(
                         duration_type=pos_notes[0].duration_type,
-                        quarter_length=pos_notes[0].duration_beats * 4
+                        quarter_length=pos_notes[0].duration_beats * BEATS_PER_MEASURE
                     )
                     measure.insert(relative_pos, rest)
             else:
@@ -143,7 +145,7 @@ class ScoreConverter:
                 m21_note = music21.note.Note(note.pitch_name) if note.pitch_name.lower() != 'rest' else music21.note.Rest()
                 m21_note.duration = DurationManager.create_duration(
                     duration_type=note.duration_type,
-                    quarter_length=note.duration_beats * 4
+                    quarter_length=note.duration_beats * BEATS_PER_MEASURE
                 )
                 measure.insert(relative_pos, m21_note)
     
@@ -166,7 +168,7 @@ class ScoreConverter:
                 # 使用第一个音符的时值
                 chord.duration = DurationManager.create_duration(
                     duration_type=chord_notes[0].duration_type,
-                    quarter_length=chord_notes[0].duration_beats * 4
+                    quarter_length=chord_notes[0].duration_beats * BEATS_PER_MEASURE
                 )
                 chord.offset = pos - measure_start
                 chords.append(chord)
@@ -176,7 +178,7 @@ class ScoreConverter:
                 m21_note = music21.note.Note(note.pitch_name)
                 m21_note.duration = DurationManager.create_duration(
                     duration_type=note.duration_type,
-                    quarter_length=note.duration_beats * 4
+                    quarter_length=note.duration_beats * BEATS_PER_MEASURE
                 )
                 m21_note.offset = pos - measure_start
                 chords.append(m21_note)
