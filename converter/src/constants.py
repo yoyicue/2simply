@@ -11,6 +11,15 @@ TOTAL_MEASURES = 17
 STAFF_SPLIT_Y = -60
 BEATS_PER_MEASURE = 4.0
 
+# 添加速度相关常量
+TEMPO = 132  # BPM (每分钟节拍数)
+TEMPO_TEXT = ""  # 速度术语
+
+# 添加作者相关常量
+COMPOSER = " "  # 默认作者名
+ARRANGER = ""  # 编曲者
+LYRICIST = ""  # 作词者
+
 class ClefType(Enum):
     """谱号类型"""
     TREBLE = "treble"  # 高音谱号
@@ -109,13 +118,53 @@ class Measure:
 class Score:
     """乐谱数据模型"""
     measures: List[Measure]
+    filename: Optional[str] = None  # 添加文件名属性
+    tempo: int = TEMPO  # 添加速度属性
+    tempo_text: str = TEMPO_TEXT  # 添加速度术语属性
+    composer: str = COMPOSER  # 添加作者
+    arranger: str = ARRANGER  # 添加编曲者
+    lyricist: str = LYRICIST  # 添加作词者
 
+    def add_metadata_to_score(self, score: music21.stream.Score) -> None:
+        """向乐谱添加元数据（包括标题、作者等）"""
+        if not score.metadata:
+            score.metadata = music21.metadata.Metadata()
+        
+        # 设置标题
+        if self.filename:
+            score.metadata.movementName = self.filename
+        
+        # 设置作者信息
+        if self.composer:
+            score.metadata.composer = self.composer
+        if self.arranger:
+            score.metadata.arranger = self.arranger
+        if self.lyricist:
+            score.metadata.lyricist = self.lyricist
+
+    def add_tempo_to_score(self, score: music21.stream.Score) -> None:
+        """向乐谱添加速度标记"""
+        mm = music21.tempo.MetronomeMark(number=self.tempo, text=self.tempo_text)
+        first_measure = score.parts[0].measure(1)
+        if first_measure:
+            first_measure.insert(0, mm)
+    
     @classmethod
     def from_json(cls, json_path: str) -> 'Score':
         """从JSON文件创建Score对象"""
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 json_data = json.load(f)
+            
+            # 获取文件名（去除路径和扩展名）
+            filename = json_path.split('/')[-1].rsplit('.json', 1)[0]
+            
+            # 获取速度和作者信息
+            tempo = json_data.get('tempo', TEMPO)
+            tempo_text = json_data.get('tempoText', TEMPO_TEXT)
+            composer = json_data.get('composer', COMPOSER)
+            arranger = json_data.get('arranger', ARRANGER)
+            lyricist = json_data.get('lyricist', LYRICIST)
             
             measures_data = json_data.get('measures', [])
             print(f"Debug - measures count in JSON: {len(measures_data)}")
@@ -147,7 +196,15 @@ class Score:
                     measure.number = i
             
             print(f"Debug - Successfully loaded {len(measures)} measures")
-            return cls(measures)
+            return cls(
+                measures=measures, 
+                filename=filename,
+                tempo=tempo,
+                tempo_text=tempo_text,
+                composer=composer,
+                arranger=arranger,
+                lyricist=lyricist
+            )
             
         except FileNotFoundError:
             raise FileNotFoundError(f"找不到JSON文件：{json_path}")

@@ -20,6 +20,10 @@ class ScoreConverter:
     def convert(self) -> music21.stream.Score:
         """将JSON格式的乐谱转换为music21格式"""
         score = music21.stream.Score()
+        
+        # 添加元数据（包括标题、作者等）
+        self.score_data.add_metadata_to_score(score)
+        
         treble_part = music21.stream.Part()
         bass_part = music21.stream.Part()
         
@@ -42,6 +46,9 @@ class ScoreConverter:
         
         score.insert(0, treble_part)
         score.insert(0, bass_part)
+        
+        # 添加速度标记
+        self.score_data.add_tempo_to_score(score)
         
         return score
     
@@ -188,9 +195,6 @@ class ScoreConverter:
     @classmethod
     def from_json(cls, json_path: str) -> 'ScoreConverter':
         """从JSON文件创建ScoreConverter对象"""
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-        
-        # Use the Score class from constants.py
+        # Score.from_json 现在会自动处理文件名
         score = Score.from_json(json_path)
-        return cls(score.measures)
+        return cls(score)
