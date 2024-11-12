@@ -57,14 +57,16 @@ class StaffDebugInfo:
 class ScoreDebugger:
     """乐谱调试器"""
     
-    def __init__(self, debug_measures: List[int]):
-        self.debug_measures = set(debug_measures)
-        self._processed_measures = set()  # 新增：记录已处理的小节
-        self.measure_info: Dict[int, Dict[str, StaffDebugInfo]] = {}
+    def __init__(self, measure_numbers: Optional[List[int]] = None):
+        """
+        初始化调试器
+        :param measure_numbers: 需要调试的小节号列表
+        """
+        self.measure_numbers = measure_numbers or []
     
     def should_debug(self, measure_number: int) -> bool:
         """判断是否需要调试该小节"""
-        return measure_number in self.debug_measures
+        return measure_number in self.measure_numbers
     
     def validate_measure(self, measure_info: StaffDebugInfo) -> bool:
         """验证小节的时值总和是否正确"""
@@ -76,7 +78,7 @@ class ScoreDebugger:
     
     def compare_measure(self, measure_number: int, measure_data, treble_measure, bass_measure):
         """Compare the original measure data with the converted measures"""
-        if measure_number not in self.debug_measures:
+        if measure_number not in self.measure_numbers:
             return
             
         # 避免重复处理同一小节

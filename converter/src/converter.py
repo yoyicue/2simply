@@ -16,6 +16,9 @@ class ScoreConverter:
     def __init__(self, score_data: Score, debugger: Optional[ScoreDebugger] = None):
         self.score_data = score_data
         self.debugger = debugger
+        self.debug_measures = []  # 添加用于存储需要调试的小节号列表
+        if debugger and debugger.measure_numbers:
+            self.debug_measures = debugger.measure_numbers
     
     def convert(self) -> music21.stream.Score:
         """将JSON格式的乐谱转换为music21格式"""
@@ -86,7 +89,8 @@ class ScoreConverter:
             measure_start=measure_data.start_position_beats
         )
         
-        if self.debugger:
+        # 只在指定的小节号时输出调试信息
+        if self.debugger and (not self.debug_measures or measure_data.number in self.debug_measures):
             print(f"Debug: Measure {measure_data.number}")
             print(f"  Treble: {[(n.nameWithOctave if isinstance(n, music21.note.Note) else 'Rest', n.duration.type, n.duration.dots, n.offset) for n in treble_measure.notes]}")
             print(f"  Bass: {[(n.nameWithOctave if isinstance(n, music21.note.Note) else 'Rest', n.duration.type, n.duration.dots, n.offset) for n in bass_measure.notes]}")
