@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Set
 import music21
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,11 @@ class DurationInfo:
 
 class DurationManager:
     """时值管理器"""
+    
+    # 添加类变量来存储调试信息
+    debug_measures: Set[int] = set()
+    current_measure: int = 0
+    debug_enabled: bool = False  # 添加调试开关
     
     # 定义基础时值映射
     BASE_DURATIONS = [
@@ -37,26 +42,32 @@ class DurationManager:
     ]
     
     @classmethod
+    def set_debug_info(cls, debug_measures: List[int], current_measure: int, debug_enabled: bool = False) -> None:
+        """设置调试信息"""
+        cls.debug_measures = set(debug_measures) if debug_measures else set()
+        cls.current_measure = current_measure
+        cls.debug_enabled = debug_enabled
+    
+    @classmethod
+    def should_log(cls) -> bool:
+        """判断是否应该输出日志"""
+        return (cls.debug_enabled and  # 首先检查是否启用调试
+                (not cls.debug_measures or cls.current_measure in cls.debug_measures))
+    
+    @classmethod
     def find_closest_duration(cls, quarter_length: float) -> DurationInfo:
-        """
-        根据 quarter_length 查找最接近的时值类型
-        
-        Args:
-            quarter_length: 四分音符数量
-            
-        Returns:
-            DurationInfo: 最接近的时值信息
-        """
+        """根据 quarter_length 查找最接近的时值类型"""
         all_durations = cls.BASE_DURATIONS + cls.DOTTED_DURATIONS
         closest = min(all_durations, 
                      key=lambda d: abs(d.quarter_length - quarter_length))
         
-        logger.debug(
-            f"查找时值 - 目标: {quarter_length}, "
-            f"找到: {closest.type_name} "
-            f"(附点: {closest.dots}, "
-            f"时值: {closest.quarter_length})"
-        )
+        if cls.should_log():
+            logger.debug(
+                f"查找时值 - 目标: {quarter_length}, "
+                f"找到: {closest.type_name} "
+                f"(附点: {closest.dots}, "
+                f"时值: {closest.quarter_length})"
+            )
         
         return closest
     
@@ -67,21 +78,7 @@ class DurationManager:
         dots: Optional[int] = None,
         quarter_length: Optional[float] = None
     ) -> music21.duration.Duration:
-        """
-        创建music21的Duration对象
-        
-        Args:
-            duration_type: 时值类型名称（如果指定）
-            dots: 附点数量（如果指定）
-            quarter_length: 四分音符数量（如果指定）
-            
-        Returns:
-            music21.duration.Duration对象
-            
-        Note:
-            - 如果提供 quarter_length，将使用 find_closest_duration 查找最接近的时值
-            - 如果提供 duration_type，将直接使用指定的时值类型
-        """
+        """创建music21的Duration对象"""
         if quarter_length is not None:
             duration_info = cls.find_closest_duration(quarter_length)
             duration = music21.duration.Duration(type=duration_info.type_name)
@@ -92,26 +89,18 @@ class DurationManager:
             duration = music21.duration.Duration(type=duration_type)
             duration.dots = dots or 0
         
-        logger.debug(
-            f"创建Duration - 类型: {duration.type}, "
-            f"附点: {duration.dots}, "
-            f"四分音符数: {duration.quarterLength}"
-        )
+        if cls.should_log():
+            logger.debug(
+                f"创建Duration - 类型: {duration.type}, "
+                f"附点: {duration.dots}, "
+                f"四分音符数: {duration.quarterLength}"
+            )
         
         return duration
     
     @classmethod
     def get_duration_info(cls, duration_type: str, dots: int = 0) -> DurationInfo:
-        """
-        获取指定时值类型的 DurationInfo
-        
-        Args:
-            duration_type: 时值类型
-            dots: 附点数量
-            
-        Returns:
-            DurationInfo: 时值信息
-        """
+        """获取指定时值类型的 DurationInfo"""
         all_durations = cls.BASE_DURATIONS + cls.DOTTED_DURATIONS
         for duration in all_durations:
             if duration.type_name == duration_type and duration.dots == dots:

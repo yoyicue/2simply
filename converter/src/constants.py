@@ -99,7 +99,7 @@ class Measure:
     def from_json(cls, measure_data: dict) -> 'Measure':
         """从JSON数据创建Measure实例"""
         return cls(
-            number=measure_data.get('number', 0) + 1,
+            number=measure_data['number'],
             height=measure_data['height'],
             staff_distance=measure_data['staffDistance'],
             width=measure_data['width'],
@@ -150,7 +150,7 @@ class Score:
             first_measure.insert(0, mm)
     
     @classmethod
-    def from_json(cls, json_path: str) -> 'Score':
+    def from_json(cls, json_path: str, debug_enabled: bool = False) -> 'Score':
         """从JSON文件创建Score对象"""
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -167,7 +167,8 @@ class Score:
             lyricist = json_data.get('lyricist', LYRICIST)
             
             measures_data = json_data.get('measures', [])
-            print(f"Debug - measures count in JSON: {len(measures_data)}")
+            if debug_enabled:
+                print(f"Debug - measures count in JSON: {len(measures_data)}")
             
             measures = []
             for i, m in enumerate(measures_data):
@@ -177,7 +178,7 @@ class Score:
                     m['number'] = measure_number
                     measure = Measure.from_json(m)
                     measures.append(measure)
-                    if i == 0:  # 只打印第一个小节的数据
+                    if debug_enabled and i == 0:  # 只在启用调试时打印第一个小节的数据
                         print(f"Debug - First measure data: {m}")
                 except Exception as e:
                     print(f"Debug - Error processing measure {i+1}: {str(e)}")

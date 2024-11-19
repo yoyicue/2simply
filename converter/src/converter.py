@@ -106,6 +106,13 @@ class ScoreConverter:
         measure_start: float
     ):
         """填充单个谱表的小节"""
+        # 设置当前小节的调试信息
+        DurationManager.set_debug_info(
+            debug_measures=self.debug_measures,
+            current_measure=measure_number,
+            debug_enabled=self.debugger is not None
+        )
+        
         if not notes:
             # 添加全小节休止符
             rest = music21.note.Rest()
@@ -199,6 +206,5 @@ class ScoreConverter:
     @classmethod
     def from_json(cls, json_path: str) -> 'ScoreConverter':
         """从JSON文件创建ScoreConverter对象"""
-        # Score.from_json 现在会自动处理文件名
-        score = Score.from_json(json_path)
+        score = Score.from_json(json_path, debug_enabled=cls.debugger is not None)
         return cls(score)
