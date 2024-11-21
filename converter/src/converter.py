@@ -19,6 +19,8 @@ class ScoreConverter:
         self.debug_measures = []  # 添加用于存储需要调试的小节号列表
         if debugger and debugger.measure_numbers:
             self.debug_measures = debugger.measure_numbers
+        # 添加连音线跟踪字典 {(pitch_midi_note, staff_type): music21.note.Note}
+        self.tie_starts = {}
     
     def convert(self) -> music21.stream.Score:
         """将JSON格式的乐谱转换为music21格式"""
@@ -135,37 +137,73 @@ class ScoreConverter:
             relative_pos = pos - measure_start
             
             if len(pos_notes) > 1:
-                # 创建和弦
-                pitches = []
-                for note in pos_notes:
-                    if note.pitch_name.lower() != 'rest':
-                        pitches.append(note.pitch_name)
-                
-                if pitches:  # 只有当有实际音符时才创建和弦
-                    chord = music21.chord.Chord(pitches)
-                    # 使用第一个音符的时值
-                    chord.duration = DurationManager.create_duration(
-                        duration_type=pos_notes[0].duration_type,
-                        quarter_length=pos_notes[0].duration_beats * BEATS_PER_MEASURE
-                    )
+                # 处理和弦
+                chord = self._create_chord_with_ties(pos_notes, staff_type)
+                if chord:
                     measure.insert(relative_pos, chord)
-                else:
-                    # 如果所有音符都是休止符，只添加一个休止符
-                    rest = music21.note.Rest()
-                    rest.duration = DurationManager.create_duration(
-                        duration_type=pos_notes[0].duration_type,
-                        quarter_length=pos_notes[0].duration_beats * BEATS_PER_MEASURE
-                    )
-                    measure.insert(relative_pos, rest)
             else:
-                # 单个音符
+                # 处理单个音符
                 note = pos_notes[0]
-                m21_note = music21.note.Note(note.pitch_name) if note.pitch_name.lower() != 'rest' else music21.note.Rest()
-                m21_note.duration = DurationManager.create_duration(
-                    duration_type=note.duration_type,
-                    quarter_length=note.duration_beats * BEATS_PER_MEASURE
-                )
+                m21_note = self._create_note_with_ties(note, staff_type)
                 measure.insert(relative_pos, m21_note)
+    
+    def _create_note_with_ties(self, note: Note, staff_type: ClefType) -> music21.note.Note:
+        """创建带有连音线的音符"""
+        if note.pitch_name.lower() == 'rest':
+            return music21.note.Rest()
+        
+        m21_note = music21.note.Note(note.pitch_name)
+        m21_note.duration = DurationManager.create_duration(
+            duration_type=note.duration_type,
+            quarter_length=note.duration_beats * BEATS_PER_MEASURE
+        )
+        
+        # 处理连音线
+        if note.tie_type and note.pitch_midi_note is not None:
+            tie_key = (note.pitch_midi_note, staff_type)
+            
+            if note.tie_type == 'start':
+                # 保存开始音符
+                self.tie_starts[tie_key] = m21_note
+                m21_note.tie = music21.tie.Tie('start')
+                
+            elif note.tie_type == 'stop':
+                # 查找对应的开始音符
+                start_note = self.tie_starts.get(tie_key)
+                if start_note:
+                    m21_note.tie = music21.tie.Tie('stop')
+                    # 清除已使用的开始音符
+                    del self.tie_starts[tie_key]
+        
+        return m21_note
+    
+    def _create_chord_with_ties(self, notes: List[Note], staff_type: ClefType) -> Optional[music21.chord.Chord]:
+        """创建带有连音线的和弦"""
+        pitches = []
+        note_objects = []
+        
+        for note in notes:
+            if note.pitch_name.lower() != 'rest':
+                m21_note = self._create_note_with_ties(note, staff_type)
+                pitches.append(note.pitch_name)
+                note_objects.append(m21_note)
+        
+        if not pitches:
+            return None
+        
+        chord = music21.chord.Chord(pitches)
+        # 使用第一个音符的时值
+        chord.duration = DurationManager.create_duration(
+            duration_type=notes[0].duration_type,
+            quarter_length=notes[0].duration_beats * BEATS_PER_MEASURE
+        )
+        
+        # 将连音线信息从单个音符转移到和弦的音符
+        for i, m21_note in enumerate(note_objects):
+            if hasattr(m21_note, 'tie') and m21_note.tie:
+                chord.notes[i].tie = m21_note.tie
+        
+        return chord
     
     def _process_chord_notes(self, notes: List[Note], measure_start: float) -> List[music21.chord.Chord]:
         """处理同一位置的多个音符（和弦）"""
