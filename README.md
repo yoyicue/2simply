@@ -17,6 +17,39 @@ A Python-based tool for bidirectional conversion between Simply Piano's propriet
   - Tempo markings
   - Staff layout and spacing
 
+## Current Limitations
+
+- This codebase was initially generated using Cursor AI, which may affect code quality and reliability
+- The JSON to MusicXML conversion currently does not fully implement width constraints from the original JSON format
+- Compact layout width calculations are not yet supported
+- Some musical notations may not be perfectly preserved during conversion
+
+## Tools
+
+The `tools/` directory contains utility scripts for testing and batch processing:
+
+- `batch_convert_compare.py`: A parallel processing tool that performs batch conversion and validation:
+  - Converts multiple JSON files to MusicXML and back
+  - Automatically compares conversion results
+  - Features parallel processing for improved performance
+  - Includes progress tracking and detailed logging
+  - Optional output file retention for debugging
+
+- `score_compare.py`: A comprehensive music score comparison tool:
+  - Performs detailed note-by-note comparison
+  - Supports configurable tolerance for floating-point values
+  - Can compare specific measures or entire scores
+  - Provides rich console output with detailed difference reporting
+  - Quiet mode for automated testing
+
+- `dlc_download.py`: Downloads music files with support for batch processing and proxy:
+  - Concurrent downloads with configurable batch size
+  - Progress tracking with rich console output
+  - Optional proxy support through scraperapi
+  - Debug mode for testing
+  - Handles both binary (images, audio) and text files
+  - Supports automatic retries and error handling
+
 ## Installation
 
 1. Clone this repository:
@@ -107,6 +140,10 @@ The converter supports standard MusicXML format (version 3.1 and 4.0), which is 
   - `constants.py`: Shared constants and data structures
   - `debug.py`: Debugging utilities
   - `duration.py`: Duration handling utilities
+- `tools/`
+  - `batch_convert_compare.py`: Parallel batch conversion and validation tool
+  - `score_compare.py`: Detailed music score comparison utility
+  - `dlc_download.py`: Music file downloader with batch and proxy support
 - `json2musicxml.py`: CLI tool for JSON to MusicXML conversion
 - `musicxml2json.py`: CLI tool for MusicXML to JSON conversion
 
