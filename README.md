@@ -6,6 +6,7 @@ A Python-based tool for bidirectional conversion between Simply Piano's propriet
 
 - Convert Simply Piano JSON format to standard MusicXML
 - Convert standard MusicXML to Simply Piano JSON format
+- Validate conversion results with detailed comparison
 - Preserve musical elements including:
   - Notes and rests
   - Chords
@@ -23,14 +24,25 @@ A Python-based tool for bidirectional conversion between Simply Piano's propriet
 - The JSON to MusicXML conversion currently does not fully implement width constraints from the original JSON format
 - Compact layout width calculations are not yet supported
 - Some musical notations may not be perfectly preserved during conversion
+- Time signatures with X/8 format (e.g., 6/8, 3/8) are not currently supported
+- The score comparison tool (`score_compare.py`) only supports comparing Simply Piano JSON files, not MusicXML files
 
-## Tools
+## Tools and Components
 
-The `tools/` directory contains utility scripts for testing and batch processing:
+### Core Components (`converter/`)
+- `json2musicxml.py`: Convert Simply Piano JSON to MusicXML
+- `musicxml2json.py`: Convert MusicXML to Simply Piano JSON
+- `score_compare.py`: Enhanced JSON score comparison tool with features:
+  - Detailed note-level comparison of Simply Piano JSON files
+  - Support for both quiet mode (`--quiet`) and verbose mode (`--verbose`)
+  - Color-coded output for better readability
+  - Exit codes for CI/CD integration (0 for match, 1 for differences)
+  - Configurable tolerance for floating-point comparisons
+  Note: This tool is specifically designed for comparing Simply Piano JSON files and cannot be used for MusicXML comparisons.
 
-- `batch_convert_compare.py`: Parallel batch conversion and validation tool for processing multiple files simultaneously
-- `score_compare.py`: Detailed comparison tool for validating music score conversions with note-level accuracy
-- `dlc_download.py`: Concurrent downloader for music files with proxy support and progress tracking
+### Utility Tools (`tools/`)
+- `batch_convert_compare.py`: Parallel batch conversion and validation tool
+- `dlc_download.py`: Concurrent downloader for music files
 
 ## Installation
 
@@ -50,7 +62,7 @@ pip install -r requirements.txt
 ### Converting Simply Piano JSON to MusicXML
 
 ```bash
-python json2musicxml.py --input input.json --output output.musicxml
+python converter/json2musicxml.py --input input.json --output output.musicxml
 ```
 
 Optional arguments:
@@ -60,14 +72,61 @@ Optional arguments:
 ### Converting MusicXML to Simply Piano JSON
 
 ```bash
-python musicxml2json.py --input input.musicxml --output output.json
+python converter/musicxml2json.py --input input.musicxml --output output.json
 ```
 
 Optional arguments:
 - `--debug`: Enable debug mode for detailed logging
 - `--debug-measures "1,3,5-7"`: Debug specific measures (comma-separated or range)
 
+### Comparing Score Files
+
+The score comparison tool is specifically designed for comparing Simply Piano JSON files. It cannot be used for comparing MusicXML files or other formats.
+
+```bash
+# Basic comparison of two Simply Piano JSON files
+python converter/score_compare.py file1.json file2.json
+
+# Quiet mode (only outputs PASS/FAIL)
+python converter/score_compare.py file1.json file2.json --quiet
+
+# Verbose mode (detailed comparison)
+python converter/score_compare.py file1.json file2.json --verbose
+
+# Custom tolerance for floating-point comparisons
+python converter/score_compare.py file1.json file2.json --tolerance 0.001
+```
+
+Note: Both input files must be in Simply Piano JSON format. For comparing conversion results, use the original JSON file and the converted-back JSON file (after MusicXML conversion).
+
+### Batch Processing
+
+```bash
+python tools/batch_convert_compare.py --cache-dir /path/to/cache --keep-output
+```
+
+Optional arguments:
+- `--processes N`: Number of parallel processes (default: CPU count)
+- `--keep-output`: Keep intermediate files
+- `--input-file`: Process single file instead of directory
+
 ## Technical Details
+
+### Project Structure
+
+- `converter/`
+  - `src/`
+    - `converter.py`: Core conversion logic for JSON to MusicXML
+    - `xml_converter.py`: Core conversion logic for MusicXML to JSON
+    - `constants.py`: Shared constants and data structures
+    - `debug.py`: Debugging utilities
+    - `duration.py`: Duration handling utilities
+  - `json2musicxml.py`: CLI tool for JSON to MusicXML conversion
+  - `musicxml2json.py`: CLI tool for MusicXML to JSON conversion
+  - `score_compare.py`: Enhanced music score comparison tool
+- `tools/`
+  - `batch_convert_compare.py`: Parallel batch processing utility
+  - `dlc_download.py`: Music file downloader
 
 ### Simply Piano JSON Format
 
@@ -113,21 +172,6 @@ The Simply Piano JSON format represents sheet music with the following structure
 The converter supports standard MusicXML format (version 3.1 and 4.0), which is widely used for sheet music exchange between different music notation software.
 
 ## Development
-
-### Project Structure
-
-- `src/`
-  - `converter.py`: Main conversion logic for JSON to MusicXML
-  - `xml_converter.py`: Main conversion logic for MusicXML to JSON
-  - `constants.py`: Shared constants and data structures
-  - `debug.py`: Debugging utilities
-  - `duration.py`: Duration handling utilities
-- `tools/`
-  - `batch_convert_compare.py`: Parallel batch conversion and validation tool
-  - `score_compare.py`: Detailed music score comparison utility
-  - `dlc_download.py`: Music file downloader with batch and proxy support
-- `json2musicxml.py`: CLI tool for JSON to MusicXML conversion
-- `musicxml2json.py`: CLI tool for MusicXML to JSON conversion
 
 ### Adding New Features
 

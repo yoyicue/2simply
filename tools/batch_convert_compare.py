@@ -103,12 +103,14 @@ def process_single_file(args: Tuple[Path, Path, Path, bool]) -> Tuple[str, bool,
             return str(input_file), False, "MusicXML到JSON转换失败"
         
         # 第三步：比较结果
-        compare_result = os.system(f'python tools/score_compare.py "{input_file}" "{output_json}" --quiet')
+        # 使用新的score_compare.py路径和quiet模式
+        compare_result = os.system(f'python converter/score_compare.py "{input_file}" "{output_json}" --quiet')
         
         # 如果不保留输出且文件在临时目录，则清理临时文件
         if not keep_output and temp_musicxml.parent == temp_dir and temp_musicxml.exists():
             temp_musicxml.unlink()
             
+        # 根据compare_result的返回值判断是否匹配（0表示匹配，1表示不匹配）
         return str(input_file), compare_result == 0, ""
         
     except Exception as e:
