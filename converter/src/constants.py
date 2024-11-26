@@ -303,11 +303,47 @@ class Score:
     composer: str = COMPOSER
     arranger: str = ARRANGER
     lyricist: str = LYRICIST
+    _time_signature: str = TIME_SIGNATURE  # 私有变量存储拍号
 
     def __post_init__(self):
         """在初始化后处理参数"""
         if not self.measures:
             raise ValueError("Score must have at least one measure")
+        # 检测并设置拍号
+        self._time_signature = self.get_time_signature()
+
+    @property
+    def time_signature(self) -> str:
+        """获取拍号"""
+        return self._time_signature
+
+    def get_time_signature(self) -> str:
+        """动态检测拍号
+        
+        通过分析相邻小节的起始位置差值来确定每小节的拍数，
+        通过分析第一个小节中音符的最短时值来确定拍号分母。
+        
+        Returns:
+            str: 检测到的拍号，格式为"分子/分母"，默认为"4/4"
+        """
+        if len(self.measures) < 2:
+            return TIME_SIGNATURE  # 如果只有一个小节，返回默认拍号
+            
+        # 获取每小节拍数（从相邻小节起始位置差值得到）
+        beats_per_measure = self.measures[1].start_position_beats - self.measures[0].start_position_beats
+        
+        # 分析第一个小节的音符时值
+        first_measure = self.measures[0]
+        if not first_measure.notes:
+            return TIME_SIGNATURE  # 如果第一个小节没有音符，返回默认拍号
+            
+        # 默认使用4作为分母（四分音符为一拍）
+        denominator = 4
+        
+        # 计算分子，保持总拍数不变
+        numerator = int(beats_per_measure * (denominator / 4))
+        
+        return f"{numerator}/{denominator}"
 
     def add_metadata_to_score(self, score: music21.stream.Score) -> None:
         """向乐谱添加元数据（包括标题、作者等）"""

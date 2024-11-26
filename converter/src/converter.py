@@ -40,12 +40,6 @@ class ScoreConverter:
         for measure_data in self.score_data.measures:
             treble_measure, bass_measure = self._process_measure(measure_data)
             
-            # 添加时间签名到第一小节
-            if measure_data.number == 1:
-                ts = music21.meter.TimeSignature(TIME_SIGNATURE)
-                treble_measure.timeSignature = ts
-                bass_measure.timeSignature = ts
-            
             treble_part.append(treble_measure)
             bass_part.append(bass_measure)
         
@@ -91,6 +85,13 @@ class ScoreConverter:
             measure_start=measure_data.start_position_beats
         )
         
+        # 只在第一小节添加拍号
+        if measure_data.number == 1:
+            # 使用Score对象的time_signature而不是全局常量
+            ts = music21.meter.TimeSignature(self.score_data.time_signature)
+            treble_measure.timeSignature = ts
+            bass_measure.timeSignature = ts
+        
         # 只在指定的小节号时输出调试信息
         if self.debugger and (not self.debug_measures or measure_data.number in self.debug_measures):
             print(f"Debug: Measure {measure_data.number}")
@@ -118,8 +119,10 @@ class ScoreConverter:
         if not notes:
             # 添加全小节休止符
             rest = music21.note.Rest()
+            # 使用当前拍号的分子作为每小节拍数
+            beats_per_measure = float(self.score_data.time_signature.split('/')[0])
             rest.duration = DurationManager.create_duration(
-                quarter_length=BEATS_PER_MEASURE
+                quarter_length=beats_per_measure
             )
             measure.append(rest)
             return
@@ -162,7 +165,8 @@ class ScoreConverter:
                 last_end_position = relative_pos + m21_note.duration.quarterLength
         
         # 处理小节末尾的剩余空间
-        remaining_duration = BEATS_PER_MEASURE - last_end_position
+        beats_per_measure = float(self.score_data.time_signature.split('/')[0])
+        remaining_duration = beats_per_measure - last_end_position
         if remaining_duration > 0:
             spacer = music21.note.GeneralNote()
             spacer.duration = music21.duration.Duration(remaining_duration)
