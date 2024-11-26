@@ -124,6 +124,10 @@ class ScoreConverter:
             measure.append(rest)
             return
 
+        # 创建临时Stream来组织音符
+        temp_stream = music21.stream.Stream()
+        last_end_position = 0.0
+        
         # 按位置分组音符
         position_groups = {}
         for note in sorted(notes, key=lambda n: n.position_beats):
@@ -133,19 +137,41 @@ class ScoreConverter:
             position_groups[pos].append(note)
         
         # 处理每个位置的音符
-        for pos, pos_notes in position_groups.items():
+        for pos, pos_notes in sorted(position_groups.items()):
             relative_pos = pos - measure_start
             
+            # 处理音符间的间隔
+            gap = relative_pos - last_end_position
+            if gap > 0:
+                # 使用GeneralNote处理间隔
+                spacer = music21.note.GeneralNote()
+                spacer.duration = music21.duration.Duration(gap)
+                spacer.editorial.comment = 'spacing'
+                temp_stream.insert(last_end_position, spacer)
+            
+            # 处理音符或和弦
             if len(pos_notes) > 1:
-                # 处理和弦
                 chord = self._create_chord_with_ties(pos_notes, staff_type)
                 if chord:
-                    measure.insert(relative_pos, chord)
+                    temp_stream.insert(relative_pos, chord)
+                    last_end_position = relative_pos + chord.duration.quarterLength
             else:
-                # 处理单个音符
                 note = pos_notes[0]
                 m21_note = self._create_note_with_ties(note, staff_type)
-                measure.insert(relative_pos, m21_note)
+                temp_stream.insert(relative_pos, m21_note)
+                last_end_position = relative_pos + m21_note.duration.quarterLength
+        
+        # 处理小节末尾的剩余空间
+        remaining_duration = BEATS_PER_MEASURE - last_end_position
+        if remaining_duration > 0:
+            spacer = music21.note.GeneralNote()
+            spacer.duration = music21.duration.Duration(remaining_duration)
+            spacer.editorial.comment = 'spacing'
+            temp_stream.insert(last_end_position, spacer)
+        
+        # 将临时Stream中的内容添加到实际小节中
+        for element in temp_stream:
+            measure.insert(element.offset, element)
     
     def _create_note_with_ties(self, note: Note, staff_type: ClefType) -> music21.note.Note:
         """创建带有连音线的音符"""
