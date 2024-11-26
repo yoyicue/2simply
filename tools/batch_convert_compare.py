@@ -5,20 +5,77 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from tqdm import tqdm
+import subprocess
+
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 
 # 设置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('batch_convert.log'),
-        logging.StreamHandler(sys.stdout)
+        logging.FileHandler('batch_convert.log', encoding='utf-8', mode='w')
     ]
 )
-logger = logging.getLogger(__name__)
+
+def log_error(file: Path, error: str):
+    """记录错误信息到日志文件"""
+    logger = logging.getLogger(__name__)
+    logger.error(f"文件: {file}\n错误: {error}")
+
+def log_and_print(message: str, level: str = "info", print_to_console: bool = True):
+    """同时记录到日志文件并打印到控制台"""
+    logger = logging.getLogger(__name__)
+    if level == "error":
+        logger.error(message)
+        if print_to_console:
+            tqdm.write(f"错误: {message}")
+    elif level == "warning":
+        logger.warning(message)
+        if print_to_console:
+            tqdm.write(f"警告: {message}")
+    else:
+        if print_to_console:
+            tqdm.write(message)
+
+class ConversionStats:
+    def __init__(self):
+        self.total_files = 0
+        self.successful_files = 0
+        self.failed_files = 0
+        self.error_details: Dict[str, str] = {}
+        self.start_time = time.time()
+    
+    def add_success(self, filename: str):
+        self.successful_files += 1
+        self.total_files += 1
+    
+    def add_failure(self, filename: str, error: str):
+        self.failed_files += 1
+        self.total_files += 1
+        self.error_details[filename] = error
+    
+    def success_rate(self) -> float:
+        return (self.successful_files / self.total_files * 100) if self.total_files > 0 else 0
+    
+    def get_summary(self) -> str:
+        duration = time.time() - self.start_time
+        summary = [
+            f"\n转换统计报告:",
+            f"总处理时间: {duration:.2f} 秒",
+            f"总文件数: {self.total_files}",
+            f"成功数量: {self.successful_files}",
+            f"失败数量: {self.failed_files}",
+            f"成功率: {self.success_rate():.1f}%"
+        ]
+        return "\n".join(summary)
 
 def setup_directories(base_dir: str) -> Tuple[Path, Path, Path]:
     """设置必要的目录结构"""
@@ -64,57 +121,104 @@ def get_song_folder_name(file_name: str) -> str:
     return base_name
 
 def process_single_file(args: Tuple[Path, Path, Path, bool]) -> Tuple[str, bool, str]:
-    """处理单个文件的转换和比较
-    
-    Returns:
-        Tuple[str, bool, str]: (文件名, 是否匹配, 错误信息)
-    """
     input_file, temp_dir, output_base_dir, keep_output = args
+    start_time = time.time()
+    
     try:
-        # 从文件名中提取歌曲文件夹名
         song_folder = get_song_folder_name(input_file.name)
-        
-        # 构建输出目录（使用歌曲名作为文件夹）
         output_dir = output_base_dir / song_folder
-        output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 从输入文件名中提取基础名称（移除.ism-hash.json部分）
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            error_msg = f"无法创建输出目录 {output_dir} (权限被拒绝)"
+            log_error(input_file, error_msg)
+            return str(input_file), False, error_msg
+        except Exception as e:
+            error_msg = f"创建输出目录失败 {output_dir} ({str(e)})"
+            log_error(input_file, error_msg)
+            return str(input_file), False, error_msg
+        
         base_name = input_file.name
         if '.ism-' in base_name:
             base_name = base_name.split('.ism-')[0]
         
-        # 构建中间musicxml文件名（如果保留输出，则放在输出目录中）
-        if keep_output:
-            temp_musicxml = output_dir / f"{base_name}.musicxml"
-        else:
-            temp_musicxml = temp_dir / f"{base_name}.musicxml"
-            
-        # 构建输出json文件名（使用歌曲文件夹）
+        temp_musicxml = (output_dir if keep_output else temp_dir) / f"{base_name}.musicxml"
         output_json = output_dir / f"{base_name}.musicxml.json"
         
-        # 第一步：JSON到MusicXML的转换
-        json2musicxml_result = os.system(f'python converter/json2musicxml.py --input "{input_file}" --output "{temp_musicxml}" > /dev/null 2>&1')
-        if json2musicxml_result != 0:
-            return str(input_file), False, "JSON到MusicXML转换失败"
+        env = os.environ.copy()
+        env['PYTHONWARNINGS'] = 'ignore'
+        env['DISABLE_LOGGING'] = '1'
         
-        # 第二步：MusicXML到JSON的转换
-        musicxml2json_result = os.system(f'python converter/musicxml2json.py --input "{temp_musicxml}" --output "{output_json}" > /dev/null 2>&1')
-        if musicxml2json_result != 0:
-            return str(input_file), False, "MusicXML到JSON转换失败"
-        
-        # 第三步：比较结果
-        # 使用新的score_compare.py路径和quiet模式
-        compare_result = os.system(f'python converter/score_compare.py "{input_file}" "{output_json}" --quiet')
-        
-        # 如果不保留输出且文件在临时目录，则清理临时文件
-        if not keep_output and temp_musicxml.parent == temp_dir and temp_musicxml.exists():
-            temp_musicxml.unlink()
+        with open(os.devnull, 'w') as devnull:
+            json2musicxml_result = subprocess.run(
+                ['python', 'converter/json2musicxml.py', '--input', str(input_file), '--output', str(temp_musicxml)],
+                stdout=devnull,
+                stderr=devnull,
+                env=env
+            ).returncode
             
-        # 根据compare_result的返回值判断是否匹配（0表示匹配，1表示不匹配）
-        return str(input_file), compare_result == 0, ""
+        if json2musicxml_result != 0:
+            error_msg = "JSON到MusicXML转换失败"
+            log_error(input_file, error_msg)
+            return str(input_file), False, error_msg
         
+        with open(os.devnull, 'w') as devnull:
+            musicxml2json_result = subprocess.run(
+                ['python', 'converter/musicxml2json.py', '--input', str(temp_musicxml), '--output', str(output_json)],
+                stdout=devnull,
+                stderr=devnull,
+                env=env
+            ).returncode
+            
+        if musicxml2json_result != 0:
+            error_msg = "MusicXML到JSON转换失败"
+            log_error(input_file, error_msg)
+            return str(input_file), False, error_msg
+        
+        compare_process = subprocess.run(
+            ['python', 'converter/score_compare.py', '--quiet', str(input_file), str(output_json)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            text=True
+        )
+        
+        compare_output = compare_process.stdout + compare_process.stderr
+        is_match = compare_process.returncode == 0
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"对比结果 - {input_file.name}:")
+        logger.info(f"{'匹配' if is_match else '不匹配'}")
+        if compare_output.strip():
+            logger.info("详细对比信息:")
+            logger.info(compare_output)
+        
+        if not is_match:
+            error_msg = (
+                f"转换结果与原始文件不匹配\n"
+                f"转换耗时: {time.time() - start_time:.2f}秒\n"
+                f"源文件: {input_file}\n"
+                f"目标文件: {output_json}\n"
+                f"对比详情:\n{compare_output}"
+            )
+            log_error(input_file, error_msg)
+            return str(input_file), False, "对比结果不匹配"
+        
+        return str(input_file), True, ""
+        
+    except FileNotFoundError as e:
+        error_msg = f"文件未找到: {str(e)}"
+        log_error(input_file, error_msg)
+        return str(input_file), False, error_msg
+    except PermissionError as e:
+        error_msg = f"权限错误: {str(e)}"
+        log_error(input_file, error_msg)
+        return str(input_file), False, error_msg
     except Exception as e:
-        return str(input_file), False, str(e)
+        error_msg = f"处理过程中发生错误: {str(e)}"
+        log_error(input_file, error_msg)
+        return str(input_file), False, error_msg
 
 def main():
     parser = argparse.ArgumentParser(description='批量转换和比较音乐文件')
@@ -142,34 +246,31 @@ def main():
         temp_dir.mkdir(exist_ok=True)
         output_dir.mkdir(exist_ok=True)
         
+        # 初始化统计对象
+        stats = ConversionStats()
+        
         if args.input_file:
             # 单文件模式
             input_file = Path(args.input_file)
             if not input_file.exists():
-                logger.error(f"输入文件不存在: {input_file}")
+                log_and_print(f"输入文件不存在: {input_file}", "error")
                 return
             
-            logger.info(f"处理单个文件: {input_file}")
             result = process_single_file((input_file, temp_dir, output_dir, args.keep_output))
             filename, match, error = result
             
             if match:
-                logger.info(f"文件处理成功: {filename}")
-                logger.info("对比结果: 完全匹配")
+                stats.add_success(filename)
             else:
-                logger.error(f"文件处理失败: {filename}")
-                if error:
-                    logger.error(f"错误信息: {error}")
-                else:
-                    logger.error("对比结果: 不匹配")
+                stats.add_failure(filename, error)
         else:
             # 批处理模式
             input_files = find_input_files(args.cache_dir)
             total_files = len(input_files)
-            logger.info(f"找到 {total_files} 个文件需要处理")
+            log_and_print(f"找到 {total_files} 个文件需要处理", print_to_console=True)
             
             if total_files == 0:
-                logger.warning("未找到符合条件的文件")
+                log_and_print("未找到符合条件的文件", "warning", print_to_console=True)
                 return
             
             # 准备进程池参数
@@ -178,48 +279,53 @@ def main():
             # 使用进程池处理文件
             with mp.Pool(processes=args.processes) as pool:
                 results = []
-                with tqdm(total=total_files, desc="处理进度") as pbar:
+                with tqdm(total=total_files, desc="处理进度", unit="files") as pbar:
                     for result in pool.imap_unordered(process_single_file, process_args):
+                        filename, match, error = result
+                        if match:
+                            stats.add_success(filename)
+                        else:
+                            stats.add_failure(filename, error)
                         results.append(result)
                         pbar.update()
-            
-            # 统计结果
-            success = sum(1 for _, match, _ in results if match)
-            failed = total_files - success
-            
-            # 输出统计信息
-            logger.info(f"\n处理完成:")
-            logger.info(f"总文件数: {total_files}")
-            logger.info(f"成功匹配: {success}")
-            logger.info(f"匹配失败: {failed}")
-            
-            # 如果有失败的情况，输出详细信息到日志
-            if failed > 0:
-                logger.info("\n失败的文件:")
-                for filename, match, error in results:
-                    if not match:
-                        logger.error(f"{filename}: {error if error else '不匹配'}")
+        
+        # 输出统计报告
+        summary = stats.get_summary()
+        log_and_print(summary, print_to_console=True)
         
     except Exception as e:
-        logger.error(f"处理过程中发生错误: {str(e)}")
+        log_and_print(str(e), "error", print_to_console=True)
         sys.exit(1)
     finally:
         # 只有在不保留输出的情况下才清理目录
         if not args.keep_output:
-            # 清理临时目录
-            if temp_dir.exists():
-                for file in temp_dir.glob("*"):
-                    file.unlink()
-                temp_dir.rmdir()
-            
-            # 清理输出目录
-            if output_dir.exists():
-                for root, dirs, files in os.walk(output_dir, topdown=False):
-                    for name in files:
-                        (Path(root) / name).unlink()
-                    for name in dirs:
-                        (Path(root) / name).rmdir()
-                output_dir.rmdir()
+            logger = logging.getLogger(__name__)
+            try:
+                # 清理临时目录
+                if temp_dir.exists():
+                    for file in temp_dir.glob("*"):
+                        try:
+                            file.unlink()
+                        except Exception as e:
+                            logger.warning(f"清理文件失败 {file}: {str(e)}")
+                    temp_dir.rmdir()
+                
+                # 清理输出目录
+                if output_dir.exists():
+                    for root, dirs, files in os.walk(output_dir, topdown=False):
+                        for name in files:
+                            try:
+                                (Path(root) / name).unlink()
+                            except Exception as e:
+                                logger.warning(f"清理文件失败 {name}: {str(e)}")
+                        for name in dirs:
+                            try:
+                                (Path(root) / name).rmdir()
+                            except Exception as e:
+                                logger.warning(f"清理目录失败 {name}: {str(e)}")
+                    output_dir.rmdir()
+            except Exception as e:
+                logger.warning(f"清理过程中发生错误: {str(e)}")
 
 if __name__ == '__main__':
     main() 
