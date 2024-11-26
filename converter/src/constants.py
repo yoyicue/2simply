@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import List, Optional
 import music21
@@ -19,6 +19,13 @@ TEMPO_TEXT = ""  # 速度术语
 COMPOSER = " "  # 默认作者名
 ARRANGER = ""  # 编曲者
 LYRICIST = ""  # 作词者
+
+# MIDI timing constants
+TICKS_PER_QUARTER_NOTE = 10080  # MIDI ticks per quarter note
+DURATION_SCALE_FACTOR = 0.5     # Scale factor to convert to output duration (1/8)
+DURATION_BEATS_PRECISION = 3     # Decimal places for duration in beats
+DURATION_SECONDS_PRECISION = 8   # Decimal places for duration in seconds
+MIN_DURATION_BEATS = 0.25       # Minimum duration in beats (eighth note)
 
 class ClefType(Enum):
     """谱号类型"""
@@ -42,49 +49,160 @@ class Position:
 @dataclass
 class Note:
     """音符数据模型"""
-    # 必需参数（无默认值）
+    # snake_case参数（必需）
     pitch_name: str
     duration_beats: float
     duration_seconds: float
     duration_type: str
     position_beats: float
     position_seconds: float
-    
-    # 可选参数（有默认值）
-    staff: Optional[str] = None
-    width: float = 0.0
-    x: float = 0.0
-    y: float = 0.0
+    width: float
+    height: float
+    x: float
+    y: float
+    staff: str  # 添加 staff 属性
     dots: int = 0
     pitch_midi_note: Optional[int] = None
     tie_type: Optional[str] = None
+    is_chord: bool = False
+    is_tuplet: bool = False
+    tuplet_ratio: Optional[str] = None
+
+    def __post_init__(self):
+        """在初始化后处理参数"""
+        # 验证必需参数
+        if not all([
+            self.pitch_name,
+            self.duration_beats is not None,
+            self.duration_seconds is not None,
+            self.duration_type,
+            self.position_beats is not None,
+            self.position_seconds is not None,
+            self.staff  # 添加 staff 验证
+        ]):
+            raise ValueError("Missing required parameters for Note")
+
+    # 添加 staff 的 getter 方法
+    def get_staff(self) -> str:
+        return self.staff
+
+    # 改用方法而不是property
+    def get_pitch_name(self) -> str:
+        return self.pitch_name
+
+    def get_duration_beats(self) -> float:
+        return self.duration_beats
+
+    def get_duration_seconds(self) -> float:
+        return self.duration_seconds
+
+    def get_duration_type(self) -> str:
+        return self.duration_type
+
+    def get_position_beats(self) -> float:
+        return self.position_beats
+
+    def get_position_seconds(self) -> float:
+        return self.position_seconds
+
+    def get_pitch_midi_note(self) -> Optional[int]:
+        return self.pitch_midi_note
+
+    def get_tie_type(self) -> Optional[str]:
+        return self.tie_type
+
+    # 为了JSON序列化，提供camelCase属性
+    @property
+    def pitchName(self) -> str:
+        return self.pitch_name
+
+    @property
+    def durationBeats(self) -> float:
+        return self.duration_beats
+
+    @property
+    def durationSeconds(self) -> float:
+        return self.duration_seconds
+
+    @property
+    def durationType(self) -> str:
+        return self.duration_type
+
+    @property
+    def positionBeats(self) -> float:
+        return self.position_beats
+
+    @property
+    def positionSeconds(self) -> float:
+        return self.position_seconds
+
+    @property
+    def pitchMidiNote(self) -> Optional[int]:
+        return self.pitch_midi_note
+
+    @property
+    def tieType(self) -> Optional[str]:
+        return self.tie_type
+
+    def is_chord_note(self) -> bool:
+        return self.is_chord
 
     @classmethod
     def from_json(cls, note_data: dict) -> 'Note':
-        """从JSON数据创建Note实例"""
+        """从JSON数据创建Note实例，支持两种命名风格"""
+        # 创建命名风格映射
+        field_mapping = {
+            'pitch_name': ['pitch_name', 'pitchName'],
+            'duration_beats': ['duration_beats', 'durationBeats'],
+            'duration_seconds': ['duration_seconds', 'durationSeconds'],
+            'duration_type': ['duration_type', 'durationType'],
+            'position_beats': ['position_beats', 'positionBeats'],
+            'position_seconds': ['position_seconds', 'positionSeconds'],
+            'pitch_midi_note': ['pitch_midi_note', 'pitchMidiNote'],
+            'tie_type': ['tie_type', 'tieType']
+        }
+
+        # 获取数据，支持两种命名风格
+        def get_value(field_names):
+            for name in field_names:
+                if name in note_data:
+                    return note_data[name]
+            return None
+
         y = note_data.get('y', 0.0)
         # 根据y坐标确定所属谱表
         staff = ClefType.TREBLE.value if y > STAFF_SPLIT_Y else ClefType.BASS.value
-        
+
+        # 增加chord属性解析
+        is_chord = note_data.get('is_chord', False)
+
+        # 创建Note实例时只使用snake_case参数名
         return cls(
-            staff=staff,  # 设置 staff 属性
-            pitch_name=note_data['pitchName'],
-            duration_beats=note_data['durationBeats'],
-            duration_seconds=note_data['durationSeconds'],
-            duration_type=note_data['durationType'],
-            position_beats=note_data['positionBeats'],
-            position_seconds=note_data['positionSeconds'],
+            staff=staff,  # 包含 staff 参数
+            pitch_name=get_value(field_mapping['pitch_name']),
+            duration_beats=get_value(field_mapping['duration_beats']),
+            duration_seconds=get_value(field_mapping['duration_seconds']),
+            duration_type=get_value(field_mapping['duration_type']),
+            position_beats=get_value(field_mapping['position_beats']),
+            position_seconds=get_value(field_mapping['position_seconds']),
             width=note_data.get('width', 0.0),
+            height=note_data.get('height', 0.0),
             x=note_data.get('x', 0.0),
             y=y,
             dots=note_data.get('dots', 0),
-            pitch_midi_note=note_data.get('pitchMidiNote'),
-            tie_type=note_data.get('tieType')
+            pitch_midi_note=get_value(field_mapping['pitch_midi_note']),
+            tie_type=get_value(field_mapping['tie_type']),
+            is_chord=is_chord
         )
+
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return asdict(self)
 
 @dataclass
 class Measure:
     """小节数据模型"""
+    # 必需参数
     number: int
     height: float
     staff_distance: float
@@ -95,35 +213,101 @@ class Measure:
     start_position_seconds: float
     notes: List[Note]
 
+    def __post_init__(self):
+        """在初始化后处理参数"""
+        # 验证必需参数
+        if not all([
+            self.staff_distance is not None,
+            self.start_position_beats is not None,
+            self.start_position_seconds is not None
+        ]):
+            raise ValueError("Missing required parameters for Measure")
+
+    # 为JSON序列化提供camelCase getter
+    @property
+    def staffDistance(self) -> float:
+        return self.staff_distance
+
+    @property
+    def startPositionBeats(self) -> float:
+        return self.start_position_beats
+
+    @property
+    def startPositionSeconds(self) -> float:
+        return self.start_position_seconds
+
     @classmethod
     def from_json(cls, measure_data: dict) -> 'Measure':
-        """从JSON数据创建Measure实例"""
+        """从JSON数据创建Measure实例，支持两种命名风格"""
+        # 首先转换所有可能的camelCase键为snake_case
+        converted_data = {}
+        
+        # 基本字段的直接映射
+        direct_fields = ['number', 'height', 'width', 'x', 'y']
+        for field in direct_fields:
+            if field in measure_data:
+                converted_data[field] = measure_data[field]
+            elif field.lower() in measure_data:  # 处理可能的大小写差异
+                converted_data[field] = measure_data[field.lower()]
+
+        # 特殊字段的映射
+        field_mapping = {
+            'staff_distance': ['staff_distance', 'staffDistance'],
+            'start_position_beats': ['start_position_beats', 'startPositionBeats'],
+            'start_position_seconds': ['start_position_seconds', 'startPositionSeconds']
+        }
+
+        # 获取数据，支持两种命名风格
+        for snake_case, variants in field_mapping.items():
+            for variant in variants:
+                if variant in measure_data:
+                    converted_data[snake_case] = measure_data[variant]
+                    break
+
+        # 处理notes数组
+        if 'notes' in measure_data:
+            converted_data['notes'] = [Note.from_json(note) for note in measure_data['notes']]
+
+        # 使用转换后的数据创建实例
         return cls(
-            number=measure_data['number'],
-            height=measure_data['height'],
-            staff_distance=measure_data['staffDistance'],
-            width=measure_data['width'],
-            x=measure_data['x'],
-            y=measure_data['y'],
-            start_position_beats=measure_data['startPositionBeats'],
-            start_position_seconds=measure_data['startPositionSeconds'],
-            notes=[Note.from_json(note) for note in measure_data['notes']]
+            number=converted_data.get('number'),
+            height=converted_data.get('height'),
+            staff_distance=converted_data.get('staff_distance'),
+            width=converted_data.get('width'),
+            x=converted_data.get('x'),
+            y=converted_data.get('y'),
+            start_position_beats=converted_data.get('start_position_beats'),
+            start_position_seconds=converted_data.get('start_position_seconds'),
+            notes=converted_data.get('notes', [])
         )
 
     def get_notes_by_staff(self, clef_type: ClefType) -> List[Note]:
         """Return notes filtered by the specified clef type."""
         return [note for note in self.notes if note.staff == clef_type.value]
 
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        data = asdict(self)
+        data['notes'] = [note.to_dict() for note in self.notes]
+        return data
+
 @dataclass
 class Score:
     """乐谱数据模型"""
     measures: List[Measure]
-    filename: Optional[str] = None  # 添加文件名属性
-    tempo: int = TEMPO  # 添加速度属性
-    tempo_text: str = TEMPO_TEXT  # 添加速度术语属性
-    composer: str = COMPOSER  # 添加作者
-    arranger: str = ARRANGER  # 添加编曲者
-    lyricist: str = LYRICIST  # 添加作词者
+    
+    # snake_case参数
+    filename: Optional[str] = None
+    tempo: int = TEMPO
+    tempo_text: str = TEMPO_TEXT
+    composer: str = COMPOSER
+    arranger: str = ARRANGER
+    lyricist: str = LYRICIST
+
+    def __post_init__(self):
+        """在初始化后处理参数"""
+        if not self.measures:
+            raise ValueError("Score must have at least one measure")
 
     def add_metadata_to_score(self, score: music21.stream.Score) -> None:
         """向乐谱添加元数据（包括标题、作者等）"""
@@ -148,7 +332,16 @@ class Score:
         first_measure = score.parts[0].measure(1)
         if first_measure:
             first_measure.insert(0, mm)
-    
+
+    # 为JSON序列化提供camelCase getter
+    @property
+    def fileName(self) -> Optional[str]:
+        return self.filename
+
+    @property
+    def tempoText(self) -> str:
+        return self.tempo_text
+
     @classmethod
     def from_json(cls, json_path: str, debug_enabled: bool = False) -> 'Score':
         """从JSON文件创建Score对象"""
@@ -159,9 +352,21 @@ class Score:
             # 获取文件名（去除路径和扩展名）
             filename = json_path.split('/')[-1].rsplit('.json', 1)[0]
             
+            # 创建命名风格映射
+            field_mapping = {
+                'tempo_text': ['tempo_text', 'tempoText'],
+                'filename': ['filename', 'fileName']
+            }
+
+            def get_value(field_names):
+                for name in field_names:
+                    if name in json_data:
+                        return json_data[name]
+                return None
+            
             # 获取速度和作者信息
             tempo = json_data.get('tempo', TEMPO)
-            tempo_text = json_data.get('tempoText', TEMPO_TEXT)
+            tempo_text = get_value(field_mapping['tempo_text']) or TEMPO_TEXT
             composer = json_data.get('composer', COMPOSER)
             arranger = json_data.get('arranger', ARRANGER)
             lyricist = json_data.get('lyricist', LYRICIST)
@@ -173,12 +378,11 @@ class Score:
             measures = []
             for i, m in enumerate(measures_data):
                 try:
-                    # 使用原始小节号，如果没有则使用索引+1
                     measure_number = m.get('number', i + 1)
                     m['number'] = measure_number
                     measure = Measure.from_json(m)
                     measures.append(measure)
-                    if debug_enabled and i == 0:  # 只在启用调试时打印第一个小节的数据
+                    if debug_enabled and i == 0:
                         print(f"Debug - First measure data: {m}")
                 except Exception as e:
                     print(f"Debug - Error processing measure {i+1}: {str(e)}")
@@ -187,16 +391,6 @@ class Score:
             if not measures:
                 raise ValueError("JSON文件中没有小节数据")
             
-            # 验证小节号的连续性
-            measure_numbers = [m.number for m in measures]
-            expected_numbers = list(range(1, len(measures) + 1))
-            if measure_numbers != expected_numbers:
-                print(f"Warning: Measure numbers are not sequential. Found: {measure_numbers}")
-                # 重新编号小节
-                for i, measure in enumerate(measures, start=1):
-                    measure.number = i
-            
-            print(f"Debug - Successfully loaded {len(measures)} measures")
             return cls(
                 measures=measures, 
                 filename=filename,
@@ -213,3 +407,29 @@ class Score:
             raise ValueError(f"JSON文件格式错误：{str(e)}")
         except Exception as e:
             raise Exception(f"解析JSON文件时出错：{str(e)}")
+
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        data = asdict(self)
+        data['measures'] = [measure.to_dict() for measure in self.measures]
+        return data
+
+    def save_json(self, output_path: str) -> None:
+        """保存为JSON文件
+        
+        Args:
+            output_path: 输出文件路径
+            
+        Raises:
+            IOError: 文件写入失败
+        """
+        try:
+            # 转换为字典
+            data = self.to_dict()
+            
+            # 写入JSON文件
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+        except Exception as e:
+            raise IOError(f"保存JSON文件失败: {str(e)}")
