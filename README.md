@@ -28,27 +28,9 @@ A Python-based tool for bidirectional conversion between Simply Piano's propriet
 
 The `tools/` directory contains utility scripts for testing and batch processing:
 
-- `batch_convert_compare.py`: A parallel processing tool that performs batch conversion and validation:
-  - Converts multiple JSON files to MusicXML and back
-  - Automatically compares conversion results
-  - Features parallel processing for improved performance
-  - Includes progress tracking and detailed logging
-  - Optional output file retention for debugging
-
-- `score_compare.py`: A comprehensive music score comparison tool:
-  - Performs detailed note-by-note comparison
-  - Supports configurable tolerance for floating-point values
-  - Can compare specific measures or entire scores
-  - Provides rich console output with detailed difference reporting
-  - Quiet mode for automated testing
-
-- `dlc_download.py`: Downloads music files with support for batch processing and proxy:
-  - Concurrent downloads with configurable batch size
-  - Progress tracking with rich console output
-  - Optional proxy support through scraperapi
-  - Debug mode for testing
-  - Handles both binary (images, audio) and text files
-  - Supports automatic retries and error handling
+- `batch_convert_compare.py`: Parallel batch conversion and validation tool for processing multiple files simultaneously
+- `score_compare.py`: Detailed comparison tool for validating music score conversions with note-level accuracy
+- `dlc_download.py`: Concurrent downloader for music files with proxy support and progress tracking
 
 ## Installation
 
