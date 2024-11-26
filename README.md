@@ -188,12 +188,8 @@ The converter supports standard MusicXML format (version 3.1 and 4.0), which is 
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## Acknowledgments
 
 - Simply Piano for inspiring this project
 - The MusicXML community for maintaining the open standard
-- music21 library for MusicXML parsing capabilities 
+- music21 library for MusicXML parsing capabilities
