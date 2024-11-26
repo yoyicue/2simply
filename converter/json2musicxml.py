@@ -82,15 +82,30 @@ def main():
                 logger.info(f"调试模式已启用，将调试以下小节：{debug_measures}")
         
         # 读取JSON文件
-        score = Score.from_json(args.input)
+        try:
+            score = Score.from_json(args.input)
+            logger.debug(f"成功读取JSON文件: {args.input}")
+            logger.debug(f"小节数量: {len(score.measures)}")
+        except Exception as e:
+            logger.error(f"读取JSON文件失败: {str(e)}")
+            raise
         
         # 创建转换器并转换
-        converter = ScoreConverter(score, debugger)
-        music21_score = converter.convert()
+        try:
+            converter = ScoreConverter(score, debugger)
+            music21_score = converter.convert()
+            logger.debug("成功转换为music21格式")
+        except Exception as e:
+            logger.error(f"转换过程失败: {str(e)}")
+            raise
         
         # 保存为MusicXML
-        music21_score.write('musicxml', args.output)
-        logger.info(f"成功：乐谱已保存至 {args.output}")
+        try:
+            music21_score.write('musicxml', args.output)
+            logger.info(f"成功：乐谱已保存至 {args.output}")
+        except Exception as e:
+            logger.error(f"保存MusicXML文件失败: {str(e)}")
+            raise
         
     except Exception as e:
         logger.error(f"错误：{str(e)}")
