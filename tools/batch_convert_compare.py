@@ -8,9 +8,10 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any
 from tqdm import tqdm
 import subprocess
+import psutil
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
@@ -50,6 +51,8 @@ class ConversionStats:
         self.total_files = 0
         self.successful_files = 0
         self.failed_files = 0
+        self.pass_count = 0
+        self.fail_count = 0
         self.error_details: Dict[str, str] = {}
         self.start_time = time.time()
     
@@ -62,8 +65,18 @@ class ConversionStats:
         self.total_files += 1
         self.error_details[filename] = error
     
+    def add_comparison_result(self, is_pass: bool):
+        if is_pass:
+            self.pass_count += 1
+        else:
+            self.fail_count += 1
+    
     def success_rate(self) -> float:
         return (self.successful_files / self.total_files * 100) if self.total_files > 0 else 0
+    
+    def match_rate(self) -> float:
+        total_comparisons = self.pass_count + self.fail_count
+        return (self.pass_count / total_comparisons * 100) if total_comparisons > 0 else 0
     
     def get_summary(self) -> str:
         duration = time.time() - self.start_time
@@ -73,7 +86,11 @@ class ConversionStats:
             f"总文件数: {self.total_files}",
             f"成功数量: {self.successful_files}",
             f"失败数量: {self.failed_files}",
-            f"成功率: {self.success_rate():.1f}%"
+            f"成功率: {self.success_rate():.1f}%",
+            f"\n内容匹配统计:",
+            f"PASS数量: {self.pass_count}",
+            f"FAIL数量: {self.fail_count}",
+            f"匹配率: {self.match_rate():.1f}%"
         ]
         return "\n".join(summary)
 
@@ -120,8 +137,8 @@ def get_song_folder_name(file_name: str) -> str:
         return '_'.join(parts[:-1])  # 返回除最后一部分以外的所有部分
     return base_name
 
-def process_single_file(args: Tuple[Path, Path, Path, bool]) -> Tuple[str, bool, str]:
-    input_file, temp_dir, output_base_dir, keep_output = args
+def process_single_file(args: Tuple[Path, Path, Path, bool, Any]) -> Tuple[str, bool, str]:
+    input_file, temp_dir, output_base_dir, keep_output, shared_stats = args
     start_time = time.time()
     
     try:
@@ -150,182 +167,198 @@ def process_single_file(args: Tuple[Path, Path, Path, bool]) -> Tuple[str, bool,
         env['PYTHONWARNINGS'] = 'ignore'
         env['DISABLE_LOGGING'] = '1'
         
-        with open(os.devnull, 'w') as devnull:
-            json2musicxml_result = subprocess.run(
-                ['python', 'converter/json2musicxml.py', '--input', str(input_file), '--output', str(temp_musicxml)],
-                stdout=devnull,
-                stderr=devnull,
-                env=env
-            ).returncode
-            
-        if json2musicxml_result != 0:
-            error_msg = "JSON到MusicXML转换失败"
-            log_error(input_file, error_msg)
-            return str(input_file), False, error_msg
+        # 合并三个操作到一个进程中
+        convert_cmd = (
+            f"python converter/json2musicxml.py --input {input_file} --output {temp_musicxml} && "
+            f"python converter/musicxml2json.py --input {temp_musicxml} --output {output_json} && "
+            f"python converter/score_compare.py --quiet {input_file} {output_json}"
+        )
         
-        with open(os.devnull, 'w') as devnull:
-            musicxml2json_result = subprocess.run(
-                ['python', 'converter/musicxml2json.py', '--input', str(temp_musicxml), '--output', str(output_json)],
-                stdout=devnull,
-                stderr=devnull,
-                env=env
-            ).returncode
-            
-        if musicxml2json_result != 0:
-            error_msg = "MusicXML到JSON转换失败"
-            log_error(input_file, error_msg)
-            return str(input_file), False, error_msg
-        
-        compare_process = subprocess.run(
-            ['python', 'converter/score_compare.py', '--quiet', str(input_file), str(output_json)],
+        process = subprocess.run(
+            convert_cmd,
+            shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
             text=True
         )
         
-        compare_output = compare_process.stdout + compare_process.stderr
-        is_match = compare_process.returncode == 0
+        is_match = process.returncode == 0
+        compare_output = process.stdout + process.stderr
         
         logger = logging.getLogger(__name__)
         logger.info(f"对比结果 - {input_file.name}:")
         logger.info(f"{'匹配' if is_match else '不匹配'}")
         if compare_output.strip():
             logger.info("详细对比信息:")
-            logger.info(compare_output)
+            logger.info("PASS" if is_match else "FAIL")
+        
+        # 更新共享统计信息
+        if is_match:
+            with shared_stats.lock:
+                shared_stats.pass_count += 1
+        else:
+            with shared_stats.lock:
+                shared_stats.fail_count += 1
         
         if not is_match:
             error_msg = (
                 f"转换结果与原始文件不匹配\n"
                 f"转换耗时: {time.time() - start_time:.2f}秒\n"
-                f"源文件: {input_file}\n"
-                f"目标文件: {output_json}\n"
-                f"对比详情:\n{compare_output}"
+                f"详细信息: {compare_output if compare_output.strip() else '无'}"
             )
-            log_error(input_file, error_msg)
-            return str(input_file), False, "对比结果不匹配"
+            return str(input_file), True, error_msg
         
         return str(input_file), True, ""
         
-    except FileNotFoundError as e:
-        error_msg = f"文件未找到: {str(e)}"
-        log_error(input_file, error_msg)
-        return str(input_file), False, error_msg
-    except PermissionError as e:
-        error_msg = f"权限错误: {str(e)}"
-        log_error(input_file, error_msg)
-        return str(input_file), False, error_msg
     except Exception as e:
         error_msg = f"处理过程中发生错误: {str(e)}"
         log_error(input_file, error_msg)
         return str(input_file), False, error_msg
 
+def get_optimal_process_count():
+    """
+    获取最优进程数
+    在 Apple Silicon 芯片上，考虑性能核心和能效核心的特点
+    """
+    cpu_count = psutil.cpu_count(logical=False)  # 获取物理CPU核心数
+    if cpu_count <= 4:
+        return max(1, cpu_count - 1)  # 小核心数机器保留一个核心给系统
+    else:
+        # Apple Silicon 通常有 4-8 个性能核心
+        # 使用 75% 的可用核心以避免系统过载
+        return max(1, int(cpu_count * 0.75))
+
+def batch_files(files: List[Path], batch_size: int) -> List[List[Path]]:
+    """
+    将文件列表分成多个批次
+    """
+    return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
+
+def process_batch(args: Tuple[List[Path], Path, Path, bool, Any]) -> List[Tuple[str, bool, str]]:
+    """
+    批量处理文件以减少进程创建开销
+    """
+    input_files, temp_dir, output_base_dir, keep_output, stats = args
+    results = []
+    
+    # 预创建所有输出目录
+    output_dirs = set()
+    for input_file in input_files:
+        song_folder = get_song_folder_name(input_file.name)
+        output_dir = output_base_dir / song_folder
+        output_dirs.add(output_dir)
+    
+    for output_dir in output_dirs:
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    
+    for input_file in input_files:
+        result = process_single_file((input_file, temp_dir, output_base_dir, keep_output, stats))
+        results.append(result)
+    
+    return results
+
 def main():
-    parser = argparse.ArgumentParser(description='批量转换和比较音乐文件')
-    parser.add_argument('--cache-dir', help='缓存目录路径')
-    parser.add_argument('--input-file', help='单个输入文件路径')
-    parser.add_argument('--processes', type=int, default=mp.cpu_count(),
-                       help='并行处理的进程数（默认使用所有CPU核心）')
-    parser.add_argument('--keep-output', action='store_true',
-                       help='保留输出文件（包括JSON和MusicXML文件）')
+    parser = argparse.ArgumentParser(description='批量转换并比对文件')
+    parser.add_argument('--cache-dir', required=True, help='缓存目录')
+    parser.add_argument('--keep-output', action='store_true', help='保留中间文件')
+    parser.add_argument('--single-process', action='store_true', help='使用单进程模式')
+    parser.add_argument('--batch-size', type=int, default=10, help='每批处理的文件数量')
     args = parser.parse_args()
     
-    # 检查参数
-    if not args.cache_dir and not args.input_file:
-        parser.error("必须指定 --cache-dir 或 --input-file 其中之一")
-    if args.cache_dir and args.input_file:
-        parser.error("--cache-dir 和 --input-file 不能同时指定")
-    
     try:
-        # 设置目录
-        base_path = Path(args.cache_dir if args.cache_dir else os.path.dirname(args.input_file))
+        # 使用 cache_dir 作为基础目录
+        base_path = Path(args.cache_dir)
         temp_dir = base_path / "temp_musicxml"
         output_dir = base_path / "output"
         
-        # 创建必要的目录
+        # 设置目录
         temp_dir.mkdir(exist_ok=True)
         output_dir.mkdir(exist_ok=True)
         
-        # 初始化统计对象
+        # 查找输入文件
+        input_files = find_input_files(args.cache_dir)
+        
+        if not input_files:
+            log_and_print("未找到符合条件的输入文件", "warning")
+            return
+        
         stats = ConversionStats()
         
-        if args.input_file:
-            # 单文件模式
-            input_file = Path(args.input_file)
-            if not input_file.exists():
-                log_and_print(f"输入文件不存在: {input_file}", "error")
-                return
-            
-            result = process_single_file((input_file, temp_dir, output_dir, args.keep_output))
-            filename, match, error = result
-            
-            if match:
-                stats.add_success(filename)
-            else:
-                stats.add_failure(filename, error)
+        if args.single_process:
+            with tqdm(total=len(input_files), desc="处理进度") as pbar:
+                for input_file in input_files:
+                    if not input_file.exists():
+                        log_and_print(f"文件不存在: {input_file}", "error")
+                        continue
+                    
+                    result = process_single_file((input_file, temp_dir, output_dir, args.keep_output, stats))
+                    filename, success, error = result
+                    
+                    if success:
+                        stats.add_success(filename)
+                    else:
+                        stats.add_failure(filename, error)
+                        log_and_print(f"处理失败 - {filename}: {error}", "error")
+                    
+                    pbar.update(1)
         else:
-            # 批处理模式
-            input_files = find_input_files(args.cache_dir)
-            total_files = len(input_files)
-            log_and_print(f"找到 {total_files} 个文件需要处理", print_to_console=True)
+            # 创建进程安全的共享统计对象
+            manager = mp.Manager()
+            shared_stats = manager.Namespace()
+            shared_stats.pass_count = 0
+            shared_stats.fail_count = 0
+            shared_stats.lock = manager.Lock()  # 添加锁以确保线程安全
             
-            if total_files == 0:
-                log_and_print("未找到符合条件的文件", "warning", print_to_console=True)
-                return
+            # 获取最优进程数
+            process_count = get_optimal_process_count()
+            log_and_print(f"使用 {process_count} 个进程进行并行处理")
             
-            # 准备进程池参数
-            process_args = [(f, temp_dir, output_dir, args.keep_output) for f in input_files]
+            # 将文件分批
+            batches = batch_files(input_files, args.batch_size)
             
-            # 使用进程池处理文件
-            with mp.Pool(processes=args.processes) as pool:
-                results = []
-                with tqdm(total=total_files, desc="处理进度", unit="files") as pbar:
-                    for result in pool.imap_unordered(process_single_file, process_args):
-                        filename, match, error = result
-                        if match:
-                            stats.add_success(filename)
-                        else:
-                            stats.add_failure(filename, error)
-                        results.append(result)
-                        pbar.update()
+            def update_stats(batch_results):
+                for filename, success, error in batch_results:
+                    if success:
+                        stats.add_success(filename)
+                    else:
+                        stats.add_failure(filename, error)
+                        log_and_print(f"处理失败 - {filename}: {error}", "error")
+                    pbar.update(1)
+            
+            def error_callback(error):
+                log_and_print(f"进程错误: {str(error)}", "error")
+            
+            with mp.Pool(processes=process_count) as pool:
+                with tqdm(total=len(input_files), desc="处理进度") as pbar:
+                    process_args = [(batch, temp_dir, output_dir, args.keep_output, shared_stats) for batch in batches]
+                    for batch_results in pool.imap_unordered(process_batch, process_args):
+                        update_stats(batch_results)
+            
+            # 更新主进程的统计信息
+            stats.pass_count = shared_stats.pass_count
+            stats.fail_count = shared_stats.fail_count
         
-        # 输出统计报告
-        summary = stats.get_summary()
-        log_and_print(summary, print_to_console=True)
+        # 输出统计信息
+        log_and_print(stats.get_summary())
         
+        # 清理临时文件
+        if not args.keep_output and temp_dir.exists():
+            for file in temp_dir.glob("*"):
+                try:
+                    file.unlink()
+                except Exception as e:
+                    log_and_print(f"清理临时文件失败 - {file}: {str(e)}", "warning")
+            temp_dir.rmdir()
+    
+    except KeyboardInterrupt:
+        log_and_print("\n用户中断处理", "warning")
     except Exception as e:
-        log_and_print(str(e), "error", print_to_console=True)
-        sys.exit(1)
-    finally:
-        # 只有在不保留输出的情况下才清理目录
-        if not args.keep_output:
-            logger = logging.getLogger(__name__)
-            try:
-                # 清理临时目录
-                if temp_dir.exists():
-                    for file in temp_dir.glob("*"):
-                        try:
-                            file.unlink()
-                        except Exception as e:
-                            logger.warning(f"清理文件失败 {file}: {str(e)}")
-                    temp_dir.rmdir()
-                
-                # 清理输出目录
-                if output_dir.exists():
-                    for root, dirs, files in os.walk(output_dir, topdown=False):
-                        for name in files:
-                            try:
-                                (Path(root) / name).unlink()
-                            except Exception as e:
-                                logger.warning(f"清理文件失败 {name}: {str(e)}")
-                        for name in dirs:
-                            try:
-                                (Path(root) / name).rmdir()
-                            except Exception as e:
-                                logger.warning(f"清理目录失败 {name}: {str(e)}")
-                    output_dir.rmdir()
-            except Exception as e:
-                logger.warning(f"清理过程中发生错误: {str(e)}")
+        log_and_print(f"发生错误: {str(e)}", "error")
+        raise
 
 if __name__ == '__main__':
     main() 
