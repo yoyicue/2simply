@@ -195,6 +195,13 @@ class ScoreConverter:
             quarter_length=note.duration_beats * BEATS_PER_MEASURE
         )
         
+        # 处理升降号
+        if note.accidental:
+            m21_note.pitch.accidental = music21.pitch.Accidental(note.accidental)
+            if note.accidental_cautionary:
+                m21_note.pitch.accidental.cautionary = True
+                m21_note.pitch.accidental.displayType = "cautionary"
+        
         # 处理连音线
         if note.tie_type and note.pitch_midi_note is not None:
             tie_key = (note.pitch_midi_note, staff_type)
@@ -235,10 +242,12 @@ class ScoreConverter:
             quarter_length=notes[0].duration_beats * BEATS_PER_MEASURE
         )
         
-        # 将连音线信息从单个音符转移到和弦的音符
+        # 将连音线和升降号信息从单个音符转移到和弦的音符
         for i, m21_note in enumerate(note_objects):
             if hasattr(m21_note, 'tie') and m21_note.tie:
                 chord.notes[i].tie = m21_note.tie
+            if hasattr(m21_note.pitch, 'accidental') and m21_note.pitch.accidental:
+                chord.notes[i].pitch.accidental = m21_note.pitch.accidental
         
         return chord
     

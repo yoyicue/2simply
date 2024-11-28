@@ -67,6 +67,8 @@ class Note:
     is_chord: bool = False
     is_tuplet: bool = False
     tuplet_ratio: Optional[str] = None
+    accidental: Optional[str] = None  # 升降号
+    accidental_cautionary: bool = False  # 是否是提示性升降号
 
     def __post_init__(self):
         """在初始化后处理参数"""
@@ -159,7 +161,9 @@ class Note:
             'position_beats': ['position_beats', 'positionBeats'],
             'position_seconds': ['position_seconds', 'positionSeconds'],
             'pitch_midi_note': ['pitch_midi_note', 'pitchMidiNote'],
-            'tie_type': ['tie_type', 'tieType']
+            'tie_type': ['tie_type', 'tieType'],
+            'accidental': ['accidental', 'accidentalType'],
+            'accidental_cautionary': ['accidental_cautionary', 'accidentalCautionary']
         }
 
         # 获取数据，支持两种命名风格
@@ -192,7 +196,9 @@ class Note:
             dots=note_data.get('dots', 0),
             pitch_midi_note=get_value(field_mapping['pitch_midi_note']),
             tie_type=get_value(field_mapping['tie_type']),
-            is_chord=is_chord
+            is_chord=is_chord,
+            accidental=get_value(field_mapping['accidental']),
+            accidental_cautionary=get_value(field_mapping['accidental_cautionary'])
         )
 
     def to_dict(self) -> dict:
