@@ -152,13 +152,15 @@ def process_single_file(args: Tuple[Path, Path, Path, bool, Any]) -> Tuple[str, 
             log_error(input_file, error_msg)
             return str(input_file), False, error_msg
         except Exception as e:
-            error_msg = f"创建输出目录失败 {output_dir} ({str(e)})"
+            error_msg = f"创建输出目录��败 {output_dir} ({str(e)})"
             log_error(input_file, error_msg)
             return str(input_file), False, error_msg
         
         base_name = input_file.name
         if '.ism-' in base_name:
             base_name = base_name.split('.ism-')[0]
+        if base_name.endswith('.musicxml'):
+            base_name = base_name[:-9]
         
         temp_musicxml = (output_dir if keep_output else temp_dir) / f"{base_name}.musicxml"
         output_json = output_dir / f"{base_name}.musicxml.json"
@@ -226,7 +228,7 @@ def get_optimal_process_count():
         return max(1, cpu_count - 1)  # 小核心数机器保留一个核心给系统
     else:
         # Apple Silicon 通常有 4-8 个性能核心
-        # 使用 75% 的可用核心以避免系统过载
+        # 使用 75% 的可用核心���避免系统过载
         return max(1, int(cpu_count * 0.75))
 
 def batch_files(files: List[Path], batch_size: int) -> List[List[Path]]:
