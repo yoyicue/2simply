@@ -22,25 +22,25 @@ class DurationManager:
     current_measure: int = 0
     debug_enabled: bool = False  # 添加调试开关
     
-    # 定义基础时值映射
+    # 增加容差值
+    TOLERANCE = 0.05
+    
+    # 基本时值定义
     BASE_DURATIONS = [
-        DurationInfo(type_name='whole', quarter_length=4.0, default_width=40.0),
-        DurationInfo(type_name='half', quarter_length=2.0, default_width=35.0),
-        DurationInfo(type_name='quarter', quarter_length=1.0, default_width=30.0),
-        DurationInfo(type_name='eighth', quarter_length=0.5, default_width=25.0),
-        DurationInfo(type_name='16th', quarter_length=0.25, default_width=20.0),
-        DurationInfo(type_name='32nd', quarter_length=0.125, default_width=15.0)
+        DurationInfo(type_name='whole', quarter_length=4.0),
+        DurationInfo(type_name='half', quarter_length=2.0),
+        DurationInfo(type_name='quarter', quarter_length=1.0),
+        DurationInfo(type_name='eighth', quarter_length=0.5),
+        DurationInfo(type_name='16th', quarter_length=0.25),
+        DurationInfo(type_name='32nd', quarter_length=0.125),
+        DurationInfo(type_name='64th', quarter_length=0.0625)
     ]
     
-    # 定义附点时值
+    # 附点时值定义
     DOTTED_DURATIONS = [
-        DurationInfo(type_name='half', quarter_length=3.0, is_dotted=True, dots=1, default_width=35.0),
-        DurationInfo(type_name='quarter', quarter_length=1.5, is_dotted=True, dots=1, default_width=30.0),
-        DurationInfo(type_name='eighth', quarter_length=0.75, is_dotted=True, dots=1, default_width=25.0),
-        # 双附点时值
-        DurationInfo(type_name='half', quarter_length=3.5, is_dotted=True, dots=2, default_width=35.0),
-        DurationInfo(type_name='quarter', quarter_length=1.75, is_dotted=True, dots=2, default_width=30.0),
-        DurationInfo(type_name='eighth', quarter_length=0.875, is_dotted=True, dots=2, default_width=25.0),
+        DurationInfo(type_name=d.type_name, quarter_length=d.quarter_length * 1.5,
+                    is_dotted=True, dots=1)
+        for d in BASE_DURATIONS
     ]
     
     @classmethod
@@ -58,47 +58,56 @@ class DurationManager:
     
     @classmethod
     def find_closest_duration(cls, quarter_length: float) -> DurationInfo:
-        """根据 quarter_length 查找最接近的时值类型"""
+        """查找最接近的时值，优先考虑标准时值"""
+        # 特殊处理四分音符的情况（处理0.167这种情况）
+        if 0.15 <= quarter_length <= 0.18:  # 针对0.167的情况
+            return next(d for d in cls.BASE_DURATIONS if d.type_name == 'quarter')
+
+        # 首先检查是否接近标准时值
+        for duration in cls.BASE_DURATIONS:
+            if abs(duration.quarter_length - quarter_length) <= cls.TOLERANCE:
+                if cls.should_log():
+                    logger.debug(
+                        f"查找时值 - 目标: {quarter_length}, "
+                        f"匹配标准时值: {duration.type_name} "
+                        f"(时值: {duration.quarter_length})"
+                    )
+                return duration
+
+        # 如果没有匹配的标准时值，再查找包括附点时值在内的最接近值
         all_durations = cls.BASE_DURATIONS + cls.DOTTED_DURATIONS
-        closest = min(all_durations, 
+        closest = min(all_durations,
                      key=lambda d: abs(d.quarter_length - quarter_length))
-        
+
         if cls.should_log():
             logger.debug(
                 f"查找时值 - 目标: {quarter_length}, "
-                f"找到: {closest.type_name} "
-                f"(附点: {closest.dots}, "
-                f"时值: {closest.quarter_length})"
+                f"最接近的时值: {closest.type_name} "
+                f"(时值: {closest.quarter_length}, 附点: {closest.is_dotted})"
             )
-        
+
         return closest
     
     @classmethod
     def create_duration(
         cls,
         duration_type: Optional[str] = None,
-        dots: Optional[int] = None,
-        quarter_length: Optional[float] = None
+        quarter_length: Optional[float] = None,
+        dots: int = 0
     ) -> music21.duration.Duration:
-        """创建music21的Duration对象"""
-        if quarter_length is not None:
-            duration_info = cls.find_closest_duration(quarter_length)
-            duration = music21.duration.Duration(type=duration_info.type_name)
-            duration.dots = duration_info.dots
-        else:
-            if duration_type is None:
-                raise ValueError("必须提供 duration_type 或 quarter_length")
+        """创建music21 Duration对象"""
+        if duration_type is not None:
             duration = music21.duration.Duration(type=duration_type)
-            duration.dots = dots or 0
-        
-        if cls.should_log():
-            logger.debug(
-                f"创建Duration - 类型: {duration.type}, "
-                f"附点: {duration.dots}, "
-                f"四分音符数: {duration.quarterLength}"
-            )
-        
-        return duration
+            duration.dots = dots
+            return duration
+
+        if quarter_length is not None:
+            dur_info = cls.find_closest_duration(quarter_length)
+            duration = music21.duration.Duration(type=dur_info.type_name)
+            duration.dots = dur_info.dots
+            return duration
+
+        raise ValueError("必须提供duration_type或quarter_length参数")
     
     @classmethod
     def get_duration_info(cls, duration_type: str, dots: int = 0) -> DurationInfo:
