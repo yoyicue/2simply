@@ -98,7 +98,16 @@ class DurationManager:
         """创建music21 Duration对象"""
         if duration_type is not None:
             duration = music21.duration.Duration(type=duration_type)
-            duration.dots = dots
+            # 获取该类型音符的标准时值
+            base_duration = next((d for d in cls.BASE_DURATIONS if d.type_name == duration_type), None)
+            if base_duration and quarter_length is not None:
+                # 如果实际时值是标准时值的1.5倍（考虑误差），则添加附点
+                if abs(quarter_length - base_duration.quarter_length * 1.5) < 0.001:
+                    duration.dots = 1
+                else:
+                    duration.dots = dots
+            else:
+                duration.dots = dots
             return duration
 
         if quarter_length is not None:
