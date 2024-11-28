@@ -13,6 +13,9 @@ import copy
 class ScoreConverter:
     """乐谱转换器"""
     
+    # 添加最小间隔阈值常量
+    MIN_GAP_THRESHOLD = 0.01
+    
     def __init__(self, score_data: Score, debugger: Optional[ScoreDebugger] = None):
         self.score_data = score_data
         self.debugger = debugger
@@ -148,10 +151,9 @@ class ScoreConverter:
         for pos, pos_notes in sorted(position_groups.items()):
             relative_pos = pos - measure_start
             
-            # 处理音符间的间隔
+            # 处理音符间的间隔，添加最小间隔阈值检查
             gap = relative_pos - last_end_position
-            if gap > 0:
-                # 使用新的休止符创建方法
+            if gap > self.MIN_GAP_THRESHOLD:  # 只有当间隔大于阈值时才添加休止符
                 rests = DurationManager.create_rest_with_duration(gap)
                 current_pos = last_end_position
                 for rest in rests:
@@ -173,7 +175,7 @@ class ScoreConverter:
         # 处理小节末尾的剩余空间
         beats_per_measure = float(self.score_data.time_signature.split('/')[0])
         remaining_duration = beats_per_measure - last_end_position
-        if remaining_duration > 0:
+        if remaining_duration > self.MIN_GAP_THRESHOLD:  # 同样对末尾的间隔应用阈值检查
             rests = DurationManager.create_rest_with_duration(remaining_duration)
             current_pos = last_end_position
             for rest in rests:
