@@ -222,3 +222,105 @@ class DurationManager:
         if dur_info.dots > 0:
             width += dur_info.dots * dur_info.dot_width_increment
         return width
+    
+    @classmethod
+    def decompose_duration(cls, quarter_length: float) -> List[DurationInfo]:
+        """将给定的时值分解为标准时值组合
+        
+        Args:
+            quarter_length: 要分解的时值（以四分音符为单位）
+            
+        Returns:
+            List[DurationInfo]: 标准时值组合列表
+            
+        Examples:
+            1.5 -> [四分音符(1.0), 八分音符(0.5)]
+            2.5 -> [二分音符(2.0), 八分音符(0.5)]
+            3.5 -> [二分音符(2.0), 四分音符(1.0), 八分音符(0.5)]
+        """
+        result = []
+        remaining = quarter_length
+        
+        # 优先使用基本时值，按照时值从大到小排序
+        base_durations = sorted(
+            cls.BASE_DURATIONS,
+            key=lambda x: x.quarter_length,
+            reverse=True
+        )
+        
+        # 如果剩余时值完全匹配某个基本时值，直接返回
+        for duration in base_durations:
+            if abs(duration.quarter_length - quarter_length) < 0.001:
+                return [duration]
+        
+        # 如果没有完全匹配的基本时值，检查是否匹配带附点的时值
+        dotted_durations = sorted(
+            cls.DOTTED_DURATIONS,
+            key=lambda x: x.quarter_length,
+            reverse=True
+        )
+        
+        for duration in dotted_durations:
+            if abs(duration.quarter_length - quarter_length) < 0.001:
+                # 对于带附点的时值，将其分解为基本时值
+                # 例如：附点四分音符(1.5) -> 四分音符(1.0) + 八分音符(0.5)
+                base_type = duration.type_name
+                base_duration = next(d for d in base_durations if d.type_name == base_type)
+                remaining_duration = duration.quarter_length - base_duration.quarter_length
+                
+                result.append(base_duration)
+                if remaining_duration > 0:
+                    # 递归处理剩余时值
+                    result.extend(cls.decompose_duration(remaining_duration))
+                return result
+        
+        # 如果没有完全匹配，则使用基本时值进行分解
+        while remaining > 0:
+            # 找到不超过剩余时值的最大基本时值
+            found = False
+            for duration in base_durations:
+                if duration.quarter_length <= remaining + 0.001:  # 添加小误差容忍
+                    result.append(duration)
+                    remaining -= duration.quarter_length
+                    found = True
+                    break
+            
+            if not found:
+                # 如果找不到合适的时值，使用最小的时值（通常是32分音符）
+                smallest = min(base_durations, key=lambda x: x.quarter_length)
+                result.append(smallest)
+                remaining -= smallest.quarter_length
+        
+        if cls.should_log():
+            logger.debug(
+                f"分解时值 {quarter_length} -> " +
+                ", ".join([f"{d.type_name}({d.quarter_length})" for d in result])
+            )
+        
+        return result
+    
+    @classmethod
+    def create_rest_with_duration(cls, quarter_length: float) -> List[music21.note.Rest]:
+        """创建一组标准时值的休止符
+        
+        Args:
+            quarter_length: 总时值（以四分音符为单位）
+            
+        Returns:
+            List[music21.note.Rest]: 休止符列表
+        """
+        durations = cls.decompose_duration(quarter_length)
+        rests = []
+        
+        for dur_info in durations:
+            rest = music21.note.Rest()
+            rest.duration = cls.create_duration_from_info(dur_info)
+            rests.append(rest)
+        
+        if cls.should_log():
+            logger.debug(
+                f"创建休止符组 {quarter_length} -> " +
+                ", ".join([f"{r.duration.type}({r.duration.quarterLength})" for r in rests])
+            )
+        
+        return rests

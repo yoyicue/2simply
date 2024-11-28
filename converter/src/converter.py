@@ -100,6 +100,14 @@ class ScoreConverter:
         
         return treble_measure, bass_measure
     
+    def _create_rest_with_duration(self, quarter_length: float) -> music21.note.Rest:
+        """创建指定时值的休止符"""
+        rest = music21.note.Rest()
+        rest.duration = DurationManager.create_duration(
+            quarter_length=quarter_length
+        )
+        return rest
+    
     def _fill_staff_measure(
         self,
         measure: music21.stream.Measure,
@@ -118,13 +126,10 @@ class ScoreConverter:
         
         if not notes:
             # 添加全小节休止符
-            rest = music21.note.Rest()
-            # 使用当前拍号的分子作为每小节拍数
             beats_per_measure = float(self.score_data.time_signature.split('/')[0])
-            rest.duration = DurationManager.create_duration(
-                quarter_length=beats_per_measure
-            )
-            measure.append(rest)
+            rests = DurationManager.create_rest_with_duration(beats_per_measure)
+            for rest in rests:
+                measure.append(rest)
             return
 
         # 创建临时Stream来组织音符
@@ -146,11 +151,12 @@ class ScoreConverter:
             # 处理音符间的间隔
             gap = relative_pos - last_end_position
             if gap > 0:
-                # 使用GeneralNote处理间隔
-                spacer = music21.note.GeneralNote()
-                spacer.duration = music21.duration.Duration(gap)
-                spacer.editorial.comment = 'spacing'
-                temp_stream.insert(last_end_position, spacer)
+                # 使用新的休止符创建方法
+                rests = DurationManager.create_rest_with_duration(gap)
+                current_pos = last_end_position
+                for rest in rests:
+                    temp_stream.insert(current_pos, rest)
+                    current_pos += rest.duration.quarterLength
             
             # 处理音符或和弦
             if len(pos_notes) > 1:
@@ -168,10 +174,11 @@ class ScoreConverter:
         beats_per_measure = float(self.score_data.time_signature.split('/')[0])
         remaining_duration = beats_per_measure - last_end_position
         if remaining_duration > 0:
-            spacer = music21.note.GeneralNote()
-            spacer.duration = music21.duration.Duration(remaining_duration)
-            spacer.editorial.comment = 'spacing'
-            temp_stream.insert(last_end_position, spacer)
+            rests = DurationManager.create_rest_with_duration(remaining_duration)
+            current_pos = last_end_position
+            for rest in rests:
+                temp_stream.insert(current_pos, rest)
+                current_pos += rest.duration.quarterLength
         
         # 将临时Stream中的内容添加到实际小节中
         for element in temp_stream:
