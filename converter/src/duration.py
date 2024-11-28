@@ -13,6 +13,9 @@ class DurationInfo:
     dots: int = 0
     default_width: float = 30.0
     dot_width_increment: float = 5.0
+    is_tuplet: bool = False
+    tuplet_ratio: Optional[Tuple[int, int]] = None  # (actual_notes, normal_notes)
+    tuplet_type: Optional[str] = None  # 基础音符类型，如 "quarter"
 
 class DurationManager:
     """统一的时值管理器 - 支持双向转换"""
@@ -59,9 +62,15 @@ class DurationManager:
     @classmethod
     def find_closest_duration(cls, quarter_length: float) -> DurationInfo:
         """查找最接近的时值，优先考虑标准时值"""
-        # 特殊处理四分音符的情况（处理0.167这种情况）
-        if 0.15 <= quarter_length <= 0.18:  # 针对0.167的情况
-            return next(d for d in cls.BASE_DURATIONS if d.type_name == 'quarter')
+        # 特殊处理六连音的情况
+        if 0.15 <= quarter_length <= 0.18:  # 1/6拍，六连音
+            return DurationInfo(
+                type_name='quarter',  # 基础类型是四分音符
+                quarter_length=0.167,  # 精确的六连音时值
+                is_tuplet=True,
+                tuplet_ratio=(6, 4),  # 6个音符在4个音符的时值内
+                tuplet_type='quarter'  # 基础音符类型
+            )
 
         # 首先检查是否接近标准时值
         for duration in cls.BASE_DURATIONS:
@@ -96,27 +105,46 @@ class DurationManager:
         dots: int = 0
     ) -> music21.duration.Duration:
         """创建music21 Duration对象"""
+        duration = music21.duration.Duration()
+        
+        # 检查是否是六连音 (1/6拍)，将其转换为三连音
+        if quarter_length is not None and abs(quarter_length - 0.167) < 0.001:
+            # 创建基础时值的Duration对象（四分音符）
+            duration.type = 'quarter'
+            duration.quarterLength = 0.167  # 设置精确的时值
+            # 创建三连音信息
+            tuplet = music21.duration.Tuplet(3, 2)
+            tuplet.setDurationType('quarter')
+            # 应用到主duration对象
+            duration.tuplets = (tuplet,)
+            
+            if cls.should_log():
+                logger.debug(
+                    f"创建三连音（由六连音转换） - 类型: quarter, "
+                    f"时值: {duration.quarterLength}, "
+                    f"tuplet: 3:2"
+                )
+            return duration
+            
+        # 处理普通音符
         if duration_type is not None:
-            duration = music21.duration.Duration(type=duration_type)
-            # 获取该类型音符的标准时值
-            base_duration = next((d for d in cls.BASE_DURATIONS if d.type_name == duration_type), None)
-            if base_duration and quarter_length is not None:
-                # 如果实际时值是标准时值的1.5倍（考虑误差），则添加附点
-                if abs(quarter_length - base_duration.quarter_length * 1.5) < 0.001:
-                    duration.dots = 1
-                else:
-                    duration.dots = dots
+            duration.type = duration_type
+            duration.dots = dots
+            # 确保设置正确的quarterLength
+            if quarter_length is not None:
+                duration.quarterLength = quarter_length
+        elif quarter_length is not None:
+            dur_info = cls.find_closest_duration(quarter_length)
+            duration.type = dur_info.type_name
+            duration.quarterLength = quarter_length  # 使用原始的时值
+            
+            # 检查是否是带附点的音符
+            if dur_info and abs(quarter_length - dur_info.quarter_length * 1.5) < 0.001:
+                duration.dots = 1
             else:
                 duration.dots = dots
-            return duration
-
-        if quarter_length is not None:
-            dur_info = cls.find_closest_duration(quarter_length)
-            duration = music21.duration.Duration(type=dur_info.type_name)
-            duration.dots = dur_info.dots
-            return duration
-
-        raise ValueError("必须提供duration_type或quarter_length参数")
+                
+        return duration
     
     @classmethod
     def get_duration_info(cls, duration_type: str, dots: int = 0) -> DurationInfo:
@@ -141,6 +169,17 @@ class DurationManager:
         """从music21 Duration对象提取时值信息"""
         quarter_length = duration.quarterLength
         dots = duration.dots
+        
+        # 检查是否是六连音
+        if duration.tuplets and len(duration.tuplets) > 0:
+            tuplet = duration.tuplets[0]
+            return DurationInfo(
+                type_name=duration.type,
+                quarter_length=quarter_length,
+                is_tuplet=True,
+                tuplet_ratio=(tuplet.numberNotesActual, tuplet.numberNotesNormal),
+                tuplet_type=tuplet.durationNormal.type
+            )
         
         # 首先尝试精确匹配
         all_durations = cls.BASE_DURATIONS + cls.DOTTED_DURATIONS
