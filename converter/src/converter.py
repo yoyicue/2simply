@@ -195,24 +195,26 @@ class ScoreConverter:
                 # 对于和弦，我们只需要处理第一个音符的beam
                 eighth_notes.append(note)
         
-        # 按照位置排序
-        eighth_notes.sort(key=lambda n: n.offset)
+        # 按照位置排序 - 使用positionBeats而不是offset
+        eighth_notes.sort(key=lambda n: n.positionBeats if hasattr(n, 'positionBeats') else n.offset)
         
         # 找出需要连接的八分音符组
         beam_groups = []
         current_group = []
         
         for i in range(len(eighth_notes)):
+            curr_note = eighth_notes[i]
+            curr_pos = curr_note.positionBeats if hasattr(curr_note, 'positionBeats') else curr_note.offset
+            
             if not current_group:
-                current_group.append(eighth_notes[i])
+                current_group.append(curr_note)
             else:
-                # 计算与前一个音符的间隔
+                # 获取当前组最后一个音符的位置
                 prev_note = current_group[-1]
-                curr_note = eighth_notes[i]
-                gap = curr_note.offset - (prev_note.offset + prev_note.duration.quarterLength)
+                prev_pos = prev_note.positionBeats if hasattr(prev_note, 'positionBeats') else prev_note.offset
                 
-                # 如果间隔很小，说明是连续的
-                if gap < self.MIN_GAP_THRESHOLD:
+                # 如果两个音符在同一拍子内（整数部分相同），则属于同一组
+                if int(curr_pos) == int(prev_pos):
                     current_group.append(curr_note)
                 else:
                     # 如果当前组有两个或以上的音符，保存它
@@ -248,6 +250,9 @@ class ScoreConverter:
             duration_type=note.duration_type,
             quarter_length=note.duration_beats * BEATS_PER_MEASURE
         )
+        
+        # 保存原始的positionBeats信息
+        m21_note.positionBeats = note.position_beats
         
         # 处理升降号
         if note.accidental:
@@ -290,11 +295,14 @@ class ScoreConverter:
             return None
         
         chord = music21.chord.Chord(pitches)
-        # 使用第一个音符的时值
+        # 使用第一个音的时值
         chord.duration = DurationManager.create_duration(
             duration_type=notes[0].duration_type,
             quarter_length=notes[0].duration_beats * BEATS_PER_MEASURE
         )
+        
+        # 保存原始的positionBeats信息
+        chord.positionBeats = notes[0].position_beats
         
         # 将连音线和升降号信息从单个音符转移到和弦的音符
         for i, m21_note in enumerate(note_objects):
