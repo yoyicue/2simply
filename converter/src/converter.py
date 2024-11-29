@@ -111,6 +111,181 @@ class ScoreConverter:
         )
         return rest
     
+    def _is_melodic_progression(self, notes: List[music21.note.Note]) -> bool:
+        """检查是否形成旋律进行"""
+        if len(notes) < 2:
+            return False
+            
+        # 判断是高音还是低音声部
+        is_bass = False
+        if isinstance(notes[0], music21.chord.Chord):
+            is_bass = notes[0].bass().midi < 60  # 使用MIDI音高60作为分界线
+        else:
+            is_bass = notes[0].pitch.midi < 60
+            
+        # 获取每个位置的最高或最低音
+        melody_line = []
+        for note in notes:
+            if isinstance(note, music21.chord.Chord):
+                # 根据声部选择最高音或最低音
+                if is_bass:
+                    melody_line.append(note.bass().midi)
+                else:
+                    melody_line.append(max(n.pitch.midi for n in note.notes))
+            else:
+                melody_line.append(note.pitch.midi)
+        
+        # 检查音高变化
+        changes = []
+        for i in range(len(melody_line) - 1):
+            change = melody_line[i+1] - melody_line[i]
+            if change != 0:  # 忽略同音
+                changes.append(change)
+                
+        # 如果没有实际的音高变化，不算是旋律进行
+        if not changes:
+            return False
+            
+        # 检查是否形成连续的上行或下行
+        is_ascending = all(c >= 0 for c in changes)
+        is_descending = all(c <= 0 for c in changes)
+        total_change = abs(melody_line[-1] - melody_line[0])
+        
+        # 总变化不能太大（最大2个八度）
+        return (is_ascending or is_descending) and total_change <= 24
+    
+    def _is_harmonic_progression(self, notes: List[music21.note.Note]) -> bool:
+        """检查一组音符是否形成和声进行"""
+        if len(notes) < 2:
+            return False
+            
+        # 检查是否都是和弦
+        if not all(isinstance(n, music21.chord.Chord) for n in notes):
+            return False
+            
+        # 检查最高音是否保持不变
+        top_notes = [n.pitches[-1].midi for n in notes]
+        if not all(p == top_notes[0] for p in top_notes):
+            return False
+            
+        return True
+    
+    def _is_tied_chord_pair(self, notes: List[music21.note.Note]) -> bool:
+        """检查是否是连音和弦对"""
+        if len(notes) != 2:  # 必须恰好是两个音符/和弦
+            return False
+            
+        # 检查是否都是和弦
+        if not all(isinstance(n, music21.chord.Chord) for n in notes):
+            return False
+            
+        # 获取两个时间点
+        positions = sorted(set(n.offset for n in notes))
+        if len(positions) != 2:  # 必须是两个不同的时间点
+            return False
+            
+        # 检查是否有连音
+        has_tie = False
+        for note in notes:
+            if isinstance(note, music21.chord.Chord):
+                if any(hasattr(n, 'tie') and n.tie for n in note.notes):
+                    has_tie = True
+                    break
+            elif hasattr(note, 'tie') and note.tie:
+                has_tie = True
+                break
+                
+        return has_tie
+    
+    def _analyze_beam_group(self, notes: List[music21.note.Note]) -> str:
+        """分析音符组的类型"""
+        if not notes:
+            return 'default'
+            
+        # 检查是否是连音和弦对
+        if len(notes) == 2 and self._is_tied_chord_pair(notes):
+            return 'tied_chord'
+            
+        # 检查是否是和声进行
+        if self._is_harmonic_progression(notes):
+            return 'harmonic'
+            
+        # 检查是否是旋律进行
+        if self._is_melodic_progression(notes):
+            return 'melodic'
+            
+        # 检查是否包含连音
+        has_tie = any(
+            hasattr(n, 'tie') and n.tie 
+            for n in notes 
+            for note in (n.notes if isinstance(n, music21.chord.Chord) else [n])
+        )
+        if has_tie:
+            return 'tied'
+            
+        return 'default'
+    
+    def _has_musical_connection(self, current_group: List[music21.note.Note], next_note: music21.note.Note) -> bool:
+        """检查是否存在音乐上的连接关系"""
+        if not current_group:
+            return False
+            
+        # 创建临时组进行分析
+        temp_group = current_group + [next_note]
+        
+        # 1. 检查连音关系
+        has_tie = any(
+            hasattr(n, 'tie') and n.tie 
+            for n in current_group 
+            for note in (n.notes if isinstance(n, music21.chord.Chord) else [n])
+        )
+        if has_tie:
+            return True
+            
+        # 2. 检查和弦连接
+        if len(temp_group) == 2 and self._is_tied_chord_pair(temp_group):
+            return True
+            
+        # 3. 检查旋律进行
+        if self._is_melodic_progression(temp_group):
+            return True
+            
+        # 4. 检查和声进行
+        if self._is_harmonic_progression(temp_group):
+            return True
+            
+        return False
+    
+    def _should_start_new_group(self, current_group: List[music21.note.Note], next_note: music21.note.Note) -> bool:
+        """判断是否应该开始新的分组"""
+        if not current_group:
+            return False
+            
+        # 获取位置信息
+        curr_pos = current_group[-1].offset
+        next_pos = next_note.offset
+        
+        # 1. 检查是否跨越整拍边界
+        if int(curr_pos) != int(next_pos):
+            # 检查是否形成连续的旋律进行
+            temp_group = current_group + [next_note]
+            if not self._is_melodic_progression(temp_group):
+                return True
+                
+        # 2. 检查当前组是否已经形成连音和弦对
+        if len(current_group) == 2 and self._is_tied_chord_pair(current_group):
+            return True
+            
+        # 3. 检查添加下一个音符是否会破坏现有的音乐模式
+        temp_group = current_group + [next_note]
+        
+        # 如果当前组是旋律进行，检查是否保持
+        if len(current_group) >= 2:
+            if self._is_melodic_progression(current_group) and not self._is_melodic_progression(temp_group):
+                return True
+                
+        return False
+    
     def _fill_staff_measure(
         self,
         measure: music21.stream.Measure,
@@ -192,10 +367,9 @@ class ScoreConverter:
             if isinstance(note, music21.note.Note) and note.duration.type == 'eighth':
                 eighth_notes.append(note)
             elif isinstance(note, music21.chord.Chord) and note.duration.type == 'eighth':
-                # 对于和弦，我们只需要处理第一个音符的beam
                 eighth_notes.append(note)
         
-        # 按照位置排序 - 使用positionBeats而不是offset
+        # 按照位置排序
         eighth_notes.sort(key=lambda n: n.positionBeats if hasattr(n, 'positionBeats') else n.offset)
         
         # 找出需要连接的八分音符组
@@ -204,24 +378,17 @@ class ScoreConverter:
         
         for i in range(len(eighth_notes)):
             curr_note = eighth_notes[i]
-            curr_pos = curr_note.positionBeats if hasattr(curr_note, 'positionBeats') else curr_note.offset
             
             if not current_group:
                 current_group.append(curr_note)
             else:
-                # 获取当前组最后一个音符的位置
-                prev_note = current_group[-1]
-                prev_pos = prev_note.positionBeats if hasattr(prev_note, 'positionBeats') else prev_note.offset
-                
-                # 如果两个音符在同一拍子内（整数部分相同），则属于同一组
-                if int(curr_pos) == int(prev_pos):
-                    current_group.append(curr_note)
-                else:
-                    # 如果当前组有两个或以上的音符，保存它
+                # 使用新的分组逻辑
+                if self._should_start_new_group(current_group, curr_note):
                     if len(current_group) >= 2:
                         beam_groups.append(current_group)
-                    # 开始新的组
                     current_group = [curr_note]
+                else:
+                    current_group.append(curr_note)
         
         # 处理最后一组
         if len(current_group) >= 2:
@@ -229,6 +396,9 @@ class ScoreConverter:
         
         # 为每组音符设置beam
         for group in beam_groups:
+            # 获取组的类型
+            group_type = self._analyze_beam_group(group)
+            
             for i, note in enumerate(group):
                 if i == 0:
                     note.beams.fill('eighth', 'start')
@@ -236,7 +406,11 @@ class ScoreConverter:
                     note.beams.fill('eighth', 'stop')
                 else:
                     note.beams.fill('eighth', 'continue')
-                    
+                
+                # 为调试目的保存组的类型
+                if hasattr(note, 'editorial'):
+                    note.editorial.comment = group_type
+        
         # 让music21处理其他beam情况
         measure.makeBeams()
     
@@ -304,7 +478,7 @@ class ScoreConverter:
         # 保存原始的positionBeats信息
         chord.positionBeats = notes[0].position_beats
         
-        # 将连音线和升降号信息从单个音符转移到和弦的音符
+        # 将连音线和升降号信息从单个音转移到和弦的音符
         for i, m21_note in enumerate(note_objects):
             if hasattr(m21_note, 'tie') and m21_note.tie:
                 chord.notes[i].tie = m21_note.tie
