@@ -185,6 +185,58 @@ class ScoreConverter:
         # 将临时Stream中的内容添加到实际小节中
         for element in temp_stream:
             measure.insert(element.offset, element)
+            
+        # 找出所有八分音符
+        eighth_notes = []
+        for note in measure.notes:
+            if isinstance(note, music21.note.Note) and note.duration.type == 'eighth':
+                eighth_notes.append(note)
+            elif isinstance(note, music21.chord.Chord) and note.duration.type == 'eighth':
+                # 对于和弦，我们只需要处理第一个音符的beam
+                eighth_notes.append(note)
+        
+        # 按照位置排序
+        eighth_notes.sort(key=lambda n: n.offset)
+        
+        # 找出需要连接的八分音符组
+        beam_groups = []
+        current_group = []
+        
+        for i in range(len(eighth_notes)):
+            if not current_group:
+                current_group.append(eighth_notes[i])
+            else:
+                # 计算与前一个音符的间隔
+                prev_note = current_group[-1]
+                curr_note = eighth_notes[i]
+                gap = curr_note.offset - (prev_note.offset + prev_note.duration.quarterLength)
+                
+                # 如果间隔很小，说明是连续的
+                if gap < self.MIN_GAP_THRESHOLD:
+                    current_group.append(curr_note)
+                else:
+                    # 如果当前组有两个或以上的音符，保存它
+                    if len(current_group) >= 2:
+                        beam_groups.append(current_group)
+                    # 开始新的组
+                    current_group = [curr_note]
+        
+        # 处理最后一组
+        if len(current_group) >= 2:
+            beam_groups.append(current_group)
+        
+        # 为每组音符设置beam
+        for group in beam_groups:
+            for i, note in enumerate(group):
+                if i == 0:
+                    note.beams.fill('eighth', 'start')
+                elif i == len(group) - 1:
+                    note.beams.fill('eighth', 'stop')
+                else:
+                    note.beams.fill('eighth', 'continue')
+                    
+        # 让music21处理其他beam情况
+        measure.makeBeams()
     
     def _create_note_with_ties(self, note: Note, staff_type: ClefType) -> music21.note.Note:
         """创建带有连音线的音符"""
