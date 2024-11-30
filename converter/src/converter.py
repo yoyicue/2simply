@@ -361,23 +361,22 @@ class ScoreConverter:
         for element in temp_stream:
             measure.insert(element.offset, element)
             
-        # 找出所有八分音符
-        eighth_notes = []
+        # 找出所有八分音符和16分音符
+        beam_notes = []
         for note in measure.notes:
-            if isinstance(note, music21.note.Note) and note.duration.type == 'eighth':
-                eighth_notes.append(note)
-            elif isinstance(note, music21.chord.Chord) and note.duration.type == 'eighth':
-                eighth_notes.append(note)
+            if isinstance(note, (music21.note.Note, music21.chord.Chord)):
+                if note.duration.type in ['eighth', '16th']:
+                    beam_notes.append(note)
         
         # 按照位置排序
-        eighth_notes.sort(key=lambda n: n.positionBeats if hasattr(n, 'positionBeats') else n.offset)
+        beam_notes.sort(key=lambda n: n.positionBeats if hasattr(n, 'positionBeats') else n.offset)
         
-        # 找出需要连接的八分音符组
+        # 找出需要连接的音符组
         beam_groups = []
         current_group = []
         
-        for i in range(len(eighth_notes)):
-            curr_note = eighth_notes[i]
+        for i in range(len(beam_notes)):
+            curr_note = beam_notes[i]
             
             if not current_group:
                 current_group.append(curr_note)
@@ -399,13 +398,19 @@ class ScoreConverter:
             # 获取组的类型
             group_type = self._analyze_beam_group(group)
             
+            # 确定是否包含16分音符
+            has_16th = any(n.duration.type == '16th' for n in group)
+            
             for i, note in enumerate(group):
-                if i == 0:
-                    note.beams.fill('eighth', 'start')
-                elif i == len(group) - 1:
-                    note.beams.fill('eighth', 'stop')
+                beam_type = 'start' if i == 0 else 'stop' if i == len(group) - 1 else 'continue'
+                
+                if note.duration.type == '16th':
+                    # 16分音符需要两层beam
+                    note.beams.fill("eighth", type=beam_type)  # 第一层
+                    note.beams.fill(2, type=beam_type)        # 第二层
                 else:
-                    note.beams.fill('eighth', 'continue')
+                    # 八分音符只需要一层beam
+                    note.beams.fill("eighth", type=beam_type)
                 
                 # 为调试目的保存组的类型
                 if hasattr(note, 'editorial'):
